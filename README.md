@@ -4,7 +4,7 @@
 
 **[開啟線上版](https://ericcc-zizgf.github.io/web-analyzer/)** · [原始碼](https://github.com/Ericcc-zizgf/web-analyzer) · [Python 本機版完整操作說明](LOCAL-README.md)
 
-![網頁分析器畫面](docs/assets/preview.png)
+![網頁分析器畫面](<docs/assets/截圖 2026-10-23 20.22.15.png>)
 
 ## 兩種版本
 

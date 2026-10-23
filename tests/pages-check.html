@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8"><title>Pages 分析器測試</title>
+<h1>Pages 分析器測試</h1><button id="run">執行測試</button><pre id="result">尚未執行</pre>
+<script src="../docs/static-analyzer.js"></script>
+<script>
+const result=document.querySelector('#result');
+const assert=(value,message)=>{if(!value)throw Error(message);};
+const form=(html)=>{const f=new FormData();f.set('mode','html');f.set('html',html);return f;};
+async function run(f){return StaticAnalyzer.route('/api/analyze',{body:f});}
+document.querySelector('#run').onclick=async()=>{
+ let passed=0;const lines=[];
+ async function check(name,task){try{await task();passed++;lines.push('PASS '+name);}catch(error){lines.push('FAIL '+name+': '+error.message);}result.textContent=lines.join('\n');}
+ await check('HTML、CSS、片段與原始屬性',async()=>{
+  const r=await run(form('<main id="hello"><style>p { color: red; }</style><p title="test">文字</p></main>'));
+  assert(r.nodes.some(n=>n.attrs.id==='hello'),'missing id');assert(r.css_rules[0].selector==='p','css rules');
+  const n=r.nodes.find(n=>n.tag==='p');const snippet=await StaticAnalyzer.route(`/api/analysis/${r.id}/node/${n.id}`);
+  assert(snippet.source.includes('title="test"'),'snippet attrs');assert(!snippet.source.includes('data-static-source-key'),'internal marker');
+ });
+ await check('HTML 檔案與獨立 CSS／JS 附加檔案',async()=>{
+  const f=form('');f.set('mode','file');f.set('html_file',new File(['<link rel="stylesheet" href="styles.css"><button id="x">x</button><'+'script src="app.js"></'+'script>'],'sample.html',{type:'text/html'}));
+  f.append('assets',new File(['button { padding: 8px; }'],'styles.css'));f.append('assets',new File(['function hello() {}'],'app.js'));
+  const r=await run(f);assert(r.source_label==='sample.html','file label');assert(r.files.length===2&&r.files.every(f=>f.loaded),'assets not loaded');assert(r.css_rules.length===1,'CSS attachment');assert(r.files.find(f=>f.kind==='js').source.includes('hello'),'JS attachment');
+ });
+ await check('未附加資源會明確標記',async()=>{const r=await run(form('<link rel="stylesheet" href="missing.css">'));assert(!r.files[0].loaded&&!!r.files[0].error,'missing resource');});
+ await check('來源腳本與資源入口移除',async()=>{
+  const text='<p onclick="alert(1)">safe</p><img src="https://example.invalid/no-load.png"><iframe srcdoc="bad"></iframe><svg onload="alert(1)"></svg><'+'script>window.__sourceExecuted=1</'+'script>';
+  const r=await run(form(text));const template=document.createElement('template');template.innerHTML=r.preview;
+  assert(!template.content.querySelector('script,iframe,svg'),'unsafe node remains');assert(!template.content.querySelector('[onclick],[onload],[src],[srcdoc]'),'resource or event remains');assert(window.__sourceExecuted===undefined,'source executed');assert(r.inline_events.length===2,'events must still be analyzed');
+ });
+ await check('HTML 大小限制',async()=>{let rejected=false;try{await run(form('x'.repeat(2*1024*1024+1)));}catch(_){rejected=true;}assert(rejected,'oversized input accepted');});
+ await check('附加檔案同名限制',async()=>{const f=form('<p>x</p>');f.append('assets',new File(['a'],'x.css'));f.append('assets',new File(['b'],'x.css'));let rejected=false;try{await run(f);}catch(_){rejected=true;}assert(rejected,'duplicates accepted');});
+ await check('JSON 網址模式拒絕',async()=>{let rejected=false;try{await StaticAnalyzer.route('/api/analyze',{body:JSON.stringify({mode:'url',url:'https://example.com'})});}catch(_){rejected=true;}assert(rejected,'URL mode accepted');});
+ await check('已取消的工作停止',async()=>{const c=new AbortController();c.abort();let rejected=false;try{await StaticAnalyzer.route('/api/analyze',{body:form('<p>x</p>'),signal:c.signal});}catch(e){rejected=e.name==='AbortError';}assert(rejected,'abort ignored');});
+ result.textContent+='\n'+passed+'/8 tests passed';
+};
+</script>

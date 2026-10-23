@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>網頁分析器 · 讀懂結構、樣式與互動</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./css-lab.js" defer></script>
+    <script src="./static-analyzer.js" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-symbol">&lt;/&gt;</span>
+        <div>網頁分析器<small>結構・樣式・互動，一起看懂。</small></div>
+      </div>
+      <div class="top-actions">
+        <button id="demo">載入示範</button
+        ><button id="export-report" disabled>下載分析 JSON</button
+        ><a href="https://github.com/Ericcc-zizgf/web-analyzer#readme" id="home-link" target="_blank" rel="noopener"
+          >使用說明與原始碼 ↗</a
+        >
+      </div>
+    </header>
+    <main>
+      <section class="input-panel" id="input-panel">
+        <div class="input-heading">
+          <div>
+            <p class="eyebrow">開始探索</p>
+            <h1>讀懂畫面背後的程式碼。</h1>
+          </div>
+          <div class="mode-tabs" role="tablist" aria-label="來源類型">
+            <button data-mode="url" class="active" role="tab" aria-selected="true">網址</button
+            ><button data-mode="html" role="tab" aria-selected="false">貼上 HTML</button
+            ><button data-mode="file" role="tab" aria-selected="false">上傳檔案</button>
+          </div>
+        </div>
+        <p class="muted">Pages 瀏覽器版：貼上或上傳 HTML，並附加 CSS／JS 即可分析。網址抓取請使用下載後的 Python 本機版；來源程式不會被執行。</p>
+        <form id="analyze-form">
+          <div id="input-url">
+            <label for="url">網頁網址</label
+            ><input
+              id="url"
+              type="url"
+              placeholder="https://example.com 或 http://127.0.0.1:5230/"
+            />
+          </div>
+          <div id="input-html" hidden>
+            <label for="html">HTML 原始碼或片段</label
+            ><textarea
+              id="html"
+              spellcheck="false"
+              placeholder="貼上 &lt;!doctype html&gt;… 或一個 HTML 區塊"
+            ></textarea>
+          </div>
+          <div id="input-file" hidden>
+            <label for="html-file">HTML 檔案（2 MB 以內）</label
+            ><input type="file" id="html-file" accept=".html,.htm,text/html" />
+            <p class="muted">例如網頁組裝室匯出的 HTML，可直接分析其中的樣式與互動。</p>
+          </div>
+          <div class="input-options">
+            <label class="checkbox"
+              ><input id="load-assets" type="checkbox" checked />讀取同來源 CSS／JS 檔案</label
+            >
+            <details>
+              <summary>附加檔案與基準網址</summary>
+              <div class="optional-fields">
+                <label for="base-url">基準網址（貼 HTML／檔案需要讀取線上資源時填寫）</label
+                ><input
+                  id="base-url"
+                  type="url"
+                  placeholder="https://example.com/page.html"
+                /><label for="asset-files"
+                  >附加 CSS／JavaScript（最多 12 份，同檔名不可重複）</label
+                ><input
+                  id="asset-files"
+                  type="file"
+                  multiple
+                  accept=".css,.js,.mjs,.jsx,.ts,.tsx"
+                />
+              </div>
+            </details>
+            <div class="submit-actions">
+              <button type="submit" id="analyze" class="primary">分析網頁 →</button
+              ><button type="button" id="cancel" hidden>取消</button>
+            </div>
+          </div>
+        </form>
+        <p id="status" role="status" aria-live="polite">
+          貼入網址，或先用示範觀察分析結果。所有解析在本機進行。
+        </p>
+      </section>
+      <section id="results" hidden>
+        <div class="workspace-heading">
+          <div>
+            <span class="workspace-dot" aria-hidden="true"></span>
+            <h2>分析工作台</h2>
+            <span class="workspace-hint">點選畫面，追溯程式碼</span>
+          </div>
+          <button id="toggle-input" aria-expanded="true" aria-controls="input-panel">
+            收起輸入區
+          </button>
+        </div>
+        <div class="summary">
+          <div><span>HTML 元素</span><strong id="count-elements">0</strong></div>
+          <div><span>CSS 規則</span><strong id="count-css">0</strong></div>
+          <div><span>JS 函式</span><strong id="count-functions">0</strong></div>
+          <div><span>事件綁定</span><strong id="count-events">0</strong></div>
+          <p id="source-label"></p>
+        </div>
+        <details id="warnings">
+          <summary id="warnings-title">分析範圍與讀取紀錄</summary>
+          <ul id="warning-list"></ul>
+        </details>
+        <div class="workbench">
+          <aside class="tree-panel">
+            <div class="panel-title">
+              <h2>HTML 結構樹</h2>
+              <span id="tree-total"></span>
+            </div>
+            <input
+              id="tree-search"
+              type="search"
+              placeholder="搜尋標籤、id、class、文字"
+              aria-label="搜尋 HTML 元素"
+            />
+            <div class="tree-actions">
+              <button id="expand-tree">全部展開</button
+              ><button id="collapse-tree">全部收合</button>
+            </div>
+            <div id="tree" aria-label="HTML 結構"></div>
+            <p class="muted">
+              點選節點，對照畫布、屬性、樣式與程式碼。結構依 HTML5 解析器修復。
+            </p>
+          </aside>
+          <section class="viewer">
+            <div class="viewer-toolbar">
+              <div class="view-tabs">
+                <button data-view="preview" class="active">網頁預覽</button
+                ><button data-view="source">原始碼</button>
+              </div>
+              <div class="width-tabs">
+                <button data-width="full" aria-pressed="true">自適應</button
+                ><button data-width="768" aria-pressed="false" title="平板寬度 768px">
+                  平板</button
+                ><button data-width="375" aria-pressed="false" title="手機寬度 375px">
+                  手機
+                </button>
+              </div>
+            </div>
+            <div id="preview-view">
+              <div class="preview-notice">
+                不執行原頁 JavaScript，也不載入圖片／字型等網路資源。
+              </div>
+              <div class="preview-stage">
+                <iframe
+                  id="preview"
+                  title="可點選元素的安全靜態預覽"
+                  sandbox="allow-same-origin"
+                ></iframe>
+              </div>
+              <div id="selection-path" class="selection-path"></div>
+            </div>
+            <div id="source-view" hidden>
+              <div class="source-toolbar">
+                <select id="source-file" aria-label="原始碼檔案"></select
+                ><button id="node-source">選取元素片段</button
+                ><button id="format-source">排版</button><button id="raw-source">原檔</button
+                ><button id="copy-source">複製</button>
+              </div>
+              <p id="source-meta" class="muted"></p>
+              <pre id="source-code" tabindex="0" aria-label="原始碼內容"></pre>
+            </div>
+          </section>
+          <aside class="inspector">
+            <div class="panel-title"><h2 id="selected-node">選取元素</h2></div>
+            <div class="inspect-tabs">
+              <button data-inspect="html" class="active">HTML</button
+              ><button data-inspect="css">CSS</button
+              ><button data-inspect="js">JavaScript</button>
+            </div>
+            <div id="inspect-content"></div>
+          </aside>
+        </div>
+      </section>
+      <section id="empty-state">
+        <div class="empty-diagram" aria-hidden="true">
+          <span>&lt;main&gt;</span><i></i>
+          <div><span>&lt;nav&gt;</span><span>&lt;section&gt;</span></div>
+        </div>
+        <h2>每一個畫面，都有可以讀懂的結構。</h2>
+        <p>從自己的作品開始，點選元素，找出它的排版與互動方式。</p>
+        <button id="empty-demo" class="primary">用示範網頁試試 →</button>
+        <div class="empty-topics">
+          <span><b>HTML</b> 元素與層級</span><span><b>CSS</b> 樣式與排版</span
+          ><span><b>JS</b> 事件與函式</span>
+        </div>
+        <p class="muted">
+          適合分析自己的作品或公開頁面的原始碼。需要登入、阻擋存取或主要由 JavaScript
+          生成的內容，可能無法完整取得。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

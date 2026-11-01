@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>原始位置與安全顯示回歸測試</title>
+<script src="../docs/source-utils.js"></script><script src="../docs/static-analyzer.js"></script><script src="../docs/source-code-view.js"></script>
+<h1>原始位置與安全顯示回歸測試</h1><button id="run">執行測試</button><pre id="out">尚未執行</pre>
+<script>
+const assert=(v,message)=>{if(!v)throw Error(message);};
+async function analyze(source){const body=new FormData();body.set('mode','html');body.set('html',source);return StaticAnalyzer.route('/api/analyze',{body});}
+document.querySelector('#run').onclick=async()=>{const out=document.querySelector('#out');out.textContent='';let count=0;const test=async(name,fn)=>{await fn();count++;out.textContent+='PASS '+name+'\n';};try{
+await test('相同標籤與內容保留各自的原始行號，不用第一次文字命中代替',async()=>{const html='<main>\n<p>same</p>\n\n<p>same</p>\n</main>';const r=await analyze(html);const p=r.nodes.filter(n=>n.tag==='p');assert(p.length===2,'p count');assert(p[0].location.line===2&&p[1].location.line===4,'original line');assert(html.slice(p[1].location.start,p[1].location.end)==='<p>','range');});
+await test('註解／腳本文字不冒充 HTML，跨行開啟標籤位置正確',async()=>{const html='<!-- <button id="fake"> -->\n<script>const text="<button id=ghost>";</'+'script>\n<button\n id="real"\n data-x="a>b">Real</button>';const r=await analyze(html),n=r.nodes.find(n=>n.attrs.id==='real');assert(n.location.line===3,'multiline line');assert(html.slice(n.location.start,n.location.end).includes('data-x="a>b"'),'quoted >');assert(!r.nodes.some(n=>n.attrs.id==='fake'||n.attrs.id==='ghost'),'fake nodes');});
+await test('HTML 解析器補建的 tbody 不捏造原始位置',async()=>{const r=await analyze('<table>\n<tr><td>x</td></tr>\n</table>');assert(!r.nodes.find(n=>n.tag==='tbody').location,'implied tbody');assert(r.nodes.find(n=>n.tag==='tr').location.line===2,'tr line');});
+await test('來源標記不外洩到預覽或元素片段',async()=>{const r=await analyze('<main><template><span>x</span></template><button id="x">x</button></main>');assert(!/data-locator-|data-static-source-key/.test(r.preview),'marker in preview');const main=r.nodes.find(n=>n.tag==='main');const snippet=await StaticAnalyzer.route('/api/analysis/'+r.id+'/node/'+main.id);assert(!/data-locator-|data-static-source-key/.test(snippet.source),'marker in snippet');});
+await test('語法著色只建立文字與 span，不解析來源 HTML',async()=>{const text='<img src=x onerror="alert(1)">';const fragment=SourceCodeView.paint(text,'html');const box=document.createElement('div');box.append(fragment);assert(!box.querySelector('img,script'),'unsafe tag');assert(box.textContent===text,'source changed');assert(box.querySelector('.token-tag'),'missing token colors');});
+out.textContent+=count+'/'+count+' tests passed';}catch(e){out.textContent+='FAIL '+e.message;}};
+</script>

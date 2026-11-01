@@ -368,6 +368,7 @@
     stop();
     const serial = state.serial;
     window.PageWorkbench.reset();
+    window.LocatorIndex?.clear();
     $("#project-page-controls").hidden = true;
     $("#project-results").hidden = true;
     $("#project-map").hidden = true;
@@ -421,6 +422,7 @@
       if (serial !== state.serial) return;
       state.worker = null;
       state.report = report;
+      window.LocatorIndex?.setProject(state.sources, report);
       render();
     } catch (e) {
       if (serial === state.serial) status(e.message);

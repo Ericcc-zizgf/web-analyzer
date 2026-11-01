@@ -32,7 +32,7 @@
   const header = $(".topbar");
   header.classList.add("flow-topbar");
   $(".brand-symbol").innerHTML = icon("code");
-  $(".brand small").textContent = "程式碼，從這裡連起來。";
+  $(".brand small").textContent = "選取畫面，找到原始檔與行號。";
   const nav = make("nav", "canvas-nav");
   nav.setAttribute("aria-label", "工作區顯示方式");
   const canvasButton = button("流程畫布", "grid", () => setList(false), "active");
@@ -127,9 +127,10 @@
   const sourcePanel = $(".project-panel");
   source.body.append(sourcePanel);
   const projectHeading = $("#project-heading");
-  projectHeading.textContent = "從你的專案開始";
+  projectHeading.textContent = "建立整個專案的原始位置索引";
   const intro = $(".project-heading .muted");
-  intro.textContent = "選一次資料夾，自動連起頁面、樣式與互動。";
+  intro.textContent =
+    "選取資料夾，建立原始檔、符號與引用索引；點選元件找出相關程式碼位置。";
   const label = $("label[for='project-folder']");
   label.textContent = "選擇專案資料夾";
   const limits = $("#project-folder").nextElementSibling;
@@ -173,7 +174,7 @@
   const viewer = $(".viewer");
   preview.body.append(viewer);
   const inspectActions = make("div", "node-preview-actions");
-  inspectActions.append(button("深入分析選取元件", "code", () => openComponent()));
+  inspectActions.append(button("尋找元件相關程式碼", "code", () => openComponent()));
   viewer.append(inspectActions);
   const previewEmpty = make("div", "preview-empty");
   const diagram = make("div", "preview-wireframe");
@@ -803,11 +804,8 @@
   const jsLearning = make("section", "learning-panel component-js-learning");
   jsLearning.id = "component-js-learning";
   jsLearning.hidden = true;
-  const explainJS = (source) => {
-    jsLearning.hidden = false;
-    window.TeachingGuide.showJS(jsLearning, source, (text, simulation) =>
-      window.PageWorkbench.explainJavaScript(text, simulation),
-    );
+  const explainJS = () => {
+    jsLearning.hidden = true;
   };
   const teachButton = button("解釋這段 JS", "", () => explainJS(detailSource));
   codeToolbar.append(teachButton);
@@ -1016,7 +1014,7 @@
     const request = ++detailRequest;
     detailTitle.textContent = selected.label;
     detailMeta.textContent =
-      "點選子元件逐層深入，或使用上方路徑返回。CSS 與 JavaScript 可在右側對照。";
+      "依原始檔案定位 HTML、CSS、JavaScript 與跨檔案引用。已確認、可能相關與查找缺口分開列出。";
     upButton.disabled = !selected.parent;
     crumbs.replaceChildren();
     for (const ancestor of selected.ancestors) {
@@ -1052,7 +1050,9 @@
     componentCode.textContent = "正在讀取目前元件…";
     formatButton.disabled = true;
     copyButton.disabled = true;
-    renderComponentFlow();
+    window.dispatchEvent(
+      new CustomEvent("analyzer:component", { detail: { id: selected.id } }),
+    );
     detailTitle.focus({ preventScroll: true });
     try {
       const result = await window.PageWorkbench.componentSource(selected.id);

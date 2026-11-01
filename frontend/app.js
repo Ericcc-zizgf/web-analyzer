@@ -91,7 +91,7 @@ async function api(path, options = {}) {
 }
 function workerCall(type, data) {
   if (!worker) {
-    worker = new Worker("/static/analysis-worker.js?v=20261102-learning1");
+    worker = new Worker("/static/analysis-worker.js?v=20261102-locator1");
     worker.onmessage = (e) => {
       const task = pending.get(e.data.id);
       if (task) {
@@ -193,6 +193,7 @@ async function analyze(projectInput = null) {
     if (run !== runSerial) return;
     window.CSSLab.reset();
     report = result;
+    window.LocatorIndex?.setPage(report);
     sourceText = "";
     rawText = "";
     $("#tree-search").value = "";
@@ -357,6 +358,8 @@ function selectNode(id) {
   }
   markSelection();
   renderInspector();
+  if (view === "source")
+    openSource("html", nodeMap.get(id)?.location?.line || nodeMap.get(id)?.line || 1);
 }
 function previewElement() {
   try {
@@ -459,7 +462,11 @@ function renderInspector() {
         "子元素 " +
           node.children.length +
           " 個" +
-          (node.line ? " · HTML5 解析位置約第 " + node.line + " 行" : ""),
+          (node.location
+            ? " · 原始開啟標籤第 " + node.location.line + " 行"
+            : node.line
+              ? " · HTML5 解析位置約第 " + node.line + " 行"
+              : ""),
         "muted",
       ),
     );
@@ -841,21 +848,49 @@ async function openSource(id, line = 1) {
 function renderSource(line = 0) {
   const pre = $("#source-code");
   pre.replaceChildren();
-  const lines = sourceText.split("\n");
-  lines.forEach((text, index) => {
-    const span = el("span", text + (index < lines.length - 1 ? "\n" : ""));
-    if (index + 1 === line) span.className = "target-line";
-    pre.append(span);
+  const range =
+    sourceFile === "html" && !formatted ? nodeMap.get(selected)?.location : null;
+  const file = report?.files.find((f) => f.id === sourceFile);
+  const kind =
+    sourceFile === "html" || sourceFile === "node" ? "html" : file?.kind || "text";
+  let offset = 0;
+  sourceText.split("\n").forEach((text, index) => {
+    const row = el("span", undefined, "original-source-line");
+    const gutter = el("span", String(index + 1), "original-line-number");
+    row.append(gutter);
+    const start = Math.max(0, (range?.start ?? 0) - offset),
+      end = Math.min(text.length, (range?.end ?? 0) - offset);
+    const paint = (value) =>
+      window.SourceCodeView
+        ? window.SourceCodeView.paint(value, kind)
+        : document.createTextNode(value);
+    if (range && end > start) {
+      row.classList.add("target-line");
+      const mark = el("mark");
+      mark.append(paint(text.slice(start, end)));
+      row.append(paint(text.slice(0, start)), mark, paint(text.slice(end)));
+    } else {
+      row.append(paint(text));
+      if (index + 1 === line) row.classList.add("target-line");
+    }
+    row.append(document.createTextNode("\n"));
+    pre.append(row);
+    offset += text.length + 1;
   });
   const target = pre.querySelector(".target-line");
-  if (target)
-    pre.scrollTop =
-      target.getBoundingClientRect().top -
-      pre.getBoundingClientRect().top +
-      pre.scrollTop -
-      40;
-  else pre.scrollTop = 0;
+  pre.scrollTop = target ? target.offsetTop - pre.offsetTop - 60 : 0;
+  pre.scrollLeft = 0;
+  const mark = target?.querySelector("mark");
+  if (mark) {
+    const rect = pre.getBoundingClientRect(),
+      ratio = rect.width / pre.offsetWidth || 1;
+    pre.scrollLeft = Math.max(
+      0,
+      (mark.getBoundingClientRect().left - rect.left) / ratio - pre.clientWidth / 3,
+    );
+  }
 }
+
 async function showNodeSource() {
   if (!report) return;
   try {
@@ -867,6 +902,13 @@ async function showNodeSource() {
     rawText = result.source;
     formatted = false;
     sourceFile = "node";
+    if (!$("#source-file").querySelector('[value="node"]')) {
+      const opt = document.createElement("option");
+      opt.value = "node";
+      opt.textContent = "目前元素片段（非原檔）";
+      $("#source-file").append(opt);
+    }
+    $("#source-file").value = "node";
     showView("source");
     $("#source-meta").textContent =
       label(nodeMap.get(id)) +
@@ -884,7 +926,8 @@ document.querySelectorAll("[data-view]").forEach(
   (b) =>
     (b.onclick = () => {
       showView(b.dataset.view);
-      if (view === "source" && !sourceText) openSource("html");
+      if (view === "source" && (!sourceText || sourceFile === "node"))
+        openSource("html", nodeMap.get(selected)?.location?.line || 1);
     }),
 );
 document.querySelectorAll("[data-inspect]").forEach(
@@ -944,9 +987,14 @@ $("#collapse-tree").onclick = () => {
   renderTree();
 };
 $("#tree-search").oninput = renderTree;
-$("#source-file").onchange = () => openSource($("#source-file").value);
+$("#source-file").onchange = () =>
+  $("#source-file").value === "node"
+    ? showNodeSource()
+    : openSource($("#source-file").value);
 $("#node-source").onclick = showNodeSource;
 $("#raw-source").onclick = () => {
+  if (sourceFile === "node")
+    return openSource("html", nodeMap.get(selected)?.location?.line || 1);
   sourceText = rawText;
   formatted = false;
   $("#source-meta").textContent += " · 顯示原始文字";
@@ -1021,6 +1069,23 @@ new ResizeObserver(() => {
 
 // Share the folder snapshot with the existing page workbench.
 window.PageWorkbench = {
+  showSelectedSnippet() {
+    return showNodeSource();
+  },
+  locatorContext() {
+    if (!report) return null;
+    const element = previewElement(),
+      node = nodeMap.get(selected);
+    if (!node) return null;
+    const descendants = [];
+    function visit(n) {
+      if (!n) return;
+      descendants.push(n);
+      for (const id of n.children) visit(nodeMap.get(id));
+    }
+    visit(node);
+    return { report, node, descendants, element };
+  },
   explainJavaScript(source, simulation) {
     return workerCall("teach", { source, simulation });
   },

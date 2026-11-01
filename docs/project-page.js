@@ -2,28 +2,109 @@
 (function (scope) {
   "use strict";
   const bytes = (text) => new TextEncoder().encode(text).length;
-  function pages(report, sources) {
-    return report.files
-      .filter(
-        (f) =>
-          /^html?$/.test(f.kind) && (!sources || typeof sources.get(f.path) === "string"),
+  // Rank document content and navigation evidence, never a privileged filename.
+  function profiles(report, sources) {
+    const candidates = report.files.filter(
+      (f) =>
+        /^html?$/.test(f.kind) && (!sources || typeof sources.get(f.path) === "string"),
+    );
+    const paths = new Set(candidates.map((f) => f.path));
+    const incoming = new Map(),
+      outgoing = new Map();
+    for (const link of report.links || []) {
+      if (
+        link.kind !== "頁面連結" ||
+        !paths.has(link.from) ||
+        !paths.has(link.target) ||
+        link.from === link.target
       )
-      .map((f) => f.path)
-      .sort((a, b) => {
-        const rank = (p) =>
-          p === "index.html"
-            ? 0
-            : p === "index.htm"
-              ? 1
-              : /(^|\/)index\.html?$/.test(p)
-                ? 2
-                : 3;
-        return (
-          rank(a) - rank(b) ||
-          a.split("/").length - b.split("/").length ||
-          a.localeCompare(b)
-        );
-      });
+        continue;
+      if (!incoming.has(link.target)) incoming.set(link.target, new Set());
+      if (!outgoing.has(link.from)) outgoing.set(link.from, new Set());
+      incoming.get(link.target).add(link.from);
+      outgoing.get(link.from).add(link.target);
+    }
+    return candidates
+      .map((file) => {
+        const source = sources?.get(file.path) || "";
+        const clean = source.replace(/<!--[\s\S]*?-->/g, "");
+        const title = (clean.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
+          .replace(/<[^>]+>/g, "")
+          .trim();
+        const body = clean.replace(/<(script|style|head)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+        const text = body
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const full = /<!doctype\s+html|<html\b|<body\b/i.test(clean);
+        const main = /<main\b|role\s*=\s*["']main["']/i.test(body);
+        const nav = /<nav\b|role\s*=\s*["']navigation["']/i.test(body);
+        const controls = (body.match(/<(?:form|button|input|select|textarea)\b/gi) || [])
+          .length;
+        const resources = (clean.match(/<(?:script|link)\b/gi) || []).length;
+        const incomingCount = incoming.get(file.path)?.size || 0;
+        const outgoingCount = outgoing.get(file.path)?.size || 0;
+        const reasons = [];
+        let score =
+          Math.min(12, Math.sqrt(text.length) / 2) +
+          Math.min(8, controls * 2) +
+          Math.min(6, resources);
+        if (full) {
+          score += 8;
+          reasons.push("完整 HTML 文件");
+        }
+        if (main) {
+          score += 10;
+          reasons.push("包含主要內容區");
+        }
+        if (nav) {
+          score += 6;
+          reasons.push("包含導覽區");
+        }
+        if (controls) reasons.push("包含 " + controls + " 個表單／操作元素");
+        if (incomingCount) {
+          score += Math.min(16, incomingCount * 4);
+          reasons.push("被 " + incomingCount + " 個頁面連入");
+        }
+        if (outgoingCount) {
+          score += Math.min(9, outgoingCount * 3);
+          reasons.push("連到 " + outgoingCount + " 個頁面");
+        }
+        if (!full && !main) {
+          score -= 10;
+          reasons.push("可能是 HTML 片段");
+        }
+        if (
+          /(?:^|\/)(?:tests?|fixtures?|examples?|demos?|__tests__)(?:\/|$)/i.test(
+            file.path,
+          )
+        ) {
+          score -= 25;
+          reasons.push("位於測試／範例目錄");
+        }
+        if (/<meta\b[^>]*http-equiv\s*=\s*["']?refresh/i.test(clean)) {
+          score -= 25;
+          reasons.push("轉址頁面");
+        }
+        if (!reasons.length) reasons.push("依可讀內容與資源標籤推測");
+        return {
+          path: file.path,
+          title: title || file.path,
+          score: Math.round(score * 10) / 10,
+          reasons,
+          incoming: incomingCount,
+          outgoing: outgoingCount,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.path.split("/").length - b.path.split("/").length ||
+          a.path.localeCompare(b.path),
+      );
+  }
+  function pages(report, sources) {
+    return profiles(report, sources).map((page) => page.path);
   }
   function create({ entry, sources, report }) {
     if (
@@ -173,7 +254,7 @@
       loadedScripts,
     };
   }
-  const api = { pages, create };
+  const api = { pages, profiles, create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else scope.ProjectPage = api;
 })(globalThis);

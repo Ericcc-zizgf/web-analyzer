@@ -1,6 +1,6 @@
 <!doctype html><meta charset="utf-8"><title>資料夾自動整頁分析測試</title>
 <h1>資料夾自動整頁分析測試</h1><button id="run">執行測試</button><pre id="result">尚未執行</pre>
-<script src="../docs/project-core.js?v=20261102"></script><script src="../docs/project-page.js?v=20261102"></script><script src="../docs/static-analyzer.js?v=20261102"></script>
+<script src="../docs/project-core.js?v=20261102-auto"></script><script src="../docs/project-page.js?v=20261102-auto"></script><script src="../docs/static-analyzer.js?v=20261102-auto"></script>
 <script>
 const assert=(v,m)=>{if(!v)throw Error(m)};
 document.querySelector('#run').onclick=async()=>{
@@ -16,9 +16,18 @@ document.querySelector('#run').onclick=async()=>{
  let r;
  await test('同一份資料夾直接分析 HTML/CSS/JS 與模組',async()=>{r=await run('index.html');assert(r.project,'project marker');assert(r.source_label==='index.html','entry');assert(r.files.find(f=>f.label==='js/module.ts')?.source.includes('a:number'),'module dependency');assert(r.css_rules.length===2,'CSS import expanded');assert(r.preview.includes('padding:4px'),'CSS import preview');});
  await test('不重新附檔切換子頁，隔離同名資源',async()=>{const second=await run('pages/two.html');assert(second.files.find(f=>f.kind==='css').label==='other/site.css','wrong same-name CSS');assert(second.files.some(f=>f.label==='other/main.js'),'wrong JS');assert(!second.files.some(f=>f.label==='js/module.ts'),'stale module');assert(second.html.includes('第二頁'),'stale HTML');});
+ await test('自動分析全部 HTML 且不中斷已選頁面片段',async()=>{
+  const all=ProjectPage.pages(report,sources); assert(all.length===2,'all HTML pages not discovered');
+  const selected=r.nodes.find(n=>n.attrs.id==='one');
+  for(let i=0;i<5;i++) {
+   const summary=await StaticAnalyzer.route('/api/analyze',{body:new FormData(),project:{entry:all[i%all.length],sources,report},summaryOnly:true});
+   assert(summary.status==='done'&&summary.elements>0,'page not analyzed');assert(summary.preview===undefined,'summary retains preview');
+  }
+  const snippet=await StaticAnalyzer.route(`/api/analysis/${r.id}/node/${selected.id}`);assert(snippet.source.includes('首頁'),'background analysis evicted active page');
+ });
  await test('資料夾模式元素片段仍能讀取',async()=>{const n=r.nodes.find(n=>n.attrs.id==='one');const result=await StaticAnalyzer.route(`/api/analysis/${r.id}/node/${n.id}`);assert(result.source.includes('首頁'),'snippet');});
  await test('缺失依賴不要求重新上傳',async()=>{const missing=new Map(sources);missing.delete('css/site.css');const result=await run('index.html',missing);assert(!result.files.find(f=>f.kind==='css').loaded,'missing file loaded');assert(result.warnings.some(w=>w.includes('資料夾中沒有')),'missing warning');});
  await test('來源腳本移除，限制與取消仍生效',async()=>{assert(!/<script\b/i.test(r.preview),'source script remains');let failed=false;try{await StaticAnalyzer.route('/api/analyze',{body:new FormData(),project:{entry:'index.html',sources,report},signal:AbortSignal.abort()})}catch(e){failed=e.name==='AbortError'}assert(failed,'abort ignored');const huge=new Map(sources);huge.set('index.html','x'.repeat(2*1024*1024+1));failed=false;try{await run('index.html',huge)}catch(e){failed=/2 MB/.test(e.message)}assert(failed,'HTML limit ignored');});
- document.querySelector('#result').textContent+='\n'+count+'/5 tests passed';
+ document.querySelector('#result').textContent+='\n'+count+'/6 tests passed';
 };
 </script>

@@ -6,12 +6,12 @@
     <title>網頁分析器 · 讀懂結構、樣式與互動</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="/static/css-lab.js" defer></script>
-    <script src="/static/static-analyzer.js?v=20261102" defer></script>
-    <script src="/static/app.js?v=20261102" defer></script>
-    <link rel="stylesheet" href="/static/project.css?v=20261102">
-    <script src="/static/project-core.js?v=20261102" defer></script>
-    <script src="/static/project-page.js?v=20261102" defer></script>
-    <script src="/static/project-ui.js?v=20261102" defer></script>
+    <script src="/static/static-analyzer.js?v=20261102-auto" defer></script>
+    <script src="/static/app.js?v=20261102-auto" defer></script>
+    <link rel="stylesheet" href="/static/project.css?v=20261102-auto">
+    <script src="/static/project-core.js?v=20261102-auto" defer></script>
+    <script src="/static/project-page.js?v=20261102-auto" defer></script>
+    <script src="/static/project-ui.js?v=20261102-auto" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -31,7 +31,7 @@
       <section class="project-panel" aria-labelledby="project-heading">
         <div class="project-heading"><div><p class="eyebrow">從整個專案開始</p>
           <h2 id="project-heading">選一個資料夾，看懂每個檔案的分工。</h2>
-          <p class="muted">自動整理資料夾結構、檔案職責、函式與引用關係。選取後自動分析入口網頁與相關 CSS／JS，不需要再次上傳。</p></div>
+          <p class="muted">自動整理資料夾結構、檔案職責、函式與引用關係。選取後掃描所有 HTML，依內容與引用關係推測入口，並自動分析各頁的結構與 CSS／JS。</p></div>
         </div>
         <label for="project-folder">選擇網頁專案資料夾</label>
         <input id="project-folder" type="file" webkitdirectory multiple>
@@ -41,9 +41,17 @@
         <div id="project-page-controls" hidden>
           <div id="project-page-picker"><label for="project-page">分析網頁（已自動使用資料夾內的檔案）</label>
           <select id="project-page"></select><button id="project-page-reanalyze" type="button">重新分析此頁</button></div>
+          <p id="project-page-reason" class="muted"></p>
           <p id="project-page-status" role="status" aria-live="polite"></p>
           <a id="project-page-link" href="#results" hidden>查看網頁分析結果 ↓</a>
         </div>
+        <section id="project-pages-overview" hidden aria-label="所有網頁的分析結果">
+          <h3>所有網頁 · 自動分析</h3>
+          <p id="project-pages-status" role="status" aria-live="polite"></p>
+          <button id="project-pages-cancel" type="button" hidden>取消其餘頁面分析</button>
+          <div class="project-pages-table"><table><thead><tr><th>HTML 檔案</th><th>頁面標題</th><th>HTML 元素</th><th>CSS 規則</th><th>JS 檔案</th><th>分析狀態</th></tr></thead><tbody id="project-pages-body"></tbody></table></div>
+          <p class="muted">每個 HTML 都會解析結構、CSS 與本機依賴。點檔名可查看完整工作台；JavaScript 函式與事件在開啟該頁時解析。入口推測無法代表公司的業務設定。</p>
+        </section>
         <details id="project-map" hidden><summary>檔案結構與職責（展開查看）</summary>
         <div id="project-results" hidden>
           <h3 id="project-title"></h3><p id="project-summary"></p><div id="project-overview"></div>

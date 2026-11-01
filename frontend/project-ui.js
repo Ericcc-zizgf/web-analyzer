@@ -16,6 +16,9 @@
     serial: 0,
     cancelTask: null,
     pageSerial: 0,
+    batchController: null,
+    pageProfiles: [],
+    pageResults: new Map(),
   };
   const status = (text) => {
     $("#project-status").textContent = text;
@@ -23,6 +26,8 @@
   function stop() {
     state.serial++;
     state.pageSerial++;
+    state.batchController?.abort();
+    state.batchController = null;
     window.PageWorkbench?.cancel();
     state.worker?.terminate();
     state.worker = null;
@@ -35,6 +40,12 @@
     const serial = ++state.pageSerial;
     const projectSerial = state.serial;
     $("#project-page").value = path;
+    const profile = state.pageProfiles.find((page) => page.path === path);
+    $("#project-page-reason").textContent = profile
+      ? "頁面線索：" +
+        profile.reasons.join("、") +
+        "。入口是靜態推測；其餘 HTML 也會一併分析。"
+      : "";
     $("#project-page-link").hidden = true;
     $("#project-page-status").textContent =
       "正在分析 " + path + " 的 HTML、CSS 與 JavaScript…";
@@ -52,6 +63,86 @@
       ? "已分析「" + path + "」，下方可直接查看畫面、HTML 結構、CSS 與 JavaScript。"
       : "這個頁面未完成分析：" + window.PageWorkbench.lastStatus();
     $("#project-page-link").hidden = !ok;
+  }
+  async function scanAll(profiles) {
+    state.batchController?.abort();
+    const batch = new AbortController();
+    state.batchController = batch;
+    const projectSerial = state.serial,
+      report = state.report,
+      sources = state.sources;
+    const table = $("#project-pages-body");
+    table.replaceChildren();
+    const rows = new Map();
+    state.pageResults = new Map();
+    report.page_analysis = profiles.map((profile) => ({ ...profile, status: "pending" }));
+    $("#project-pages-overview").hidden = !profiles.length;
+    $("#project-pages-cancel").hidden = false;
+    for (const profile of profiles) {
+      const row = node("tr"),
+        name = node("td"),
+        button = node("button", profile.path);
+      button.type = "button";
+      button.onclick = () => openPage(profile.path);
+      name.append(button);
+      row.append(name, node("td", profile.title));
+      for (let i = 0; i < 3; i++) row.append(node("td", "—"));
+      row.append(node("td", "等待分析"));
+      table.append(row);
+      rows.set(profile.path, row);
+    }
+    let completed = 0,
+      failed = 0;
+    for (const profile of profiles) {
+      if (batch.signal.aborted || projectSerial !== state.serial) break;
+      $("#project-pages-status").textContent =
+        `正在自動分析所有 HTML：${completed + failed} / ${profiles.length}，目前 ${profile.path}`;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (batch.signal.aborted || projectSerial !== state.serial) break;
+      let result;
+      try {
+        result = await window.StaticAnalyzer.route("/api/analyze", {
+          body: new FormData(),
+          project: { entry: profile.path, sources, report },
+          signal: batch.signal,
+          summaryOnly: true,
+        });
+        if (batch.signal.aborted || projectSerial !== state.serial) break;
+        completed++;
+      } catch (error) {
+        if (batch.signal.aborted || projectSerial !== state.serial) break;
+        result = { path: profile.path, status: "error", error: error.message };
+        failed++;
+      }
+      state.pageResults.set(profile.path, result);
+      Object.assign(
+        report.page_analysis.find((page) => page.path === profile.path),
+        result,
+      );
+      const cells = rows.get(profile.path).children;
+      cells[2].textContent = result.elements ?? "—";
+      cells[3].textContent = result.css_rules ?? "—";
+      cells[4].textContent = result.scripts ?? "—";
+      cells[5].textContent =
+        result.status === "error"
+          ? result.error
+          : result.missing.length
+            ? `完成，缺少 ${result.missing.length} 個資源`
+            : "完成";
+    }
+    if (projectSerial !== state.serial || state.batchController !== batch) return;
+    if (batch.signal.aborted) {
+      for (const page of report.page_analysis)
+        if (page.status === "pending") {
+          page.status = "cancelled";
+          rows.get(page.path).lastElementChild.textContent = "已取消";
+        }
+    }
+    $("#project-pages-status").textContent =
+      `共找到 ${profiles.length} 個 HTML，已完成 ${completed} 個、失敗 ${failed} 個` +
+      (batch.signal.aborted ? "，其餘已取消。" : "。不需要指定 index.html 或逐頁上傳。");
+    $("#project-pages-cancel").hidden = true;
+    state.batchController = null;
   }
   function download(data, name, type) {
     const a = node("a");
@@ -245,18 +336,25 @@
         r.files.find((f) => /readme/i.test(f.path))?.path ||
         r.files[0]?.path,
     );
-    const pages = ProjectPage.pages(r, state.sources);
+    state.pageProfiles = ProjectPage.profiles(r, state.sources);
+    const pages = state.pageProfiles.map((page) => page.path);
     $("#project-page").replaceChildren(
       ...pages.map((path) => {
-        const option = node("option", path);
+        const profile = state.pageProfiles.find((page) => page.path === path);
+        const option = node(
+          "option",
+          (profile?.title && profile.title !== path ? profile.title + " · " : "") + path,
+        );
         option.value = path;
         return option;
       }),
     );
     $("#project-page-picker").hidden = !pages.length;
     $("#project-page-link").hidden = true;
-    if (pages.length) openPage(pages[0]);
-    else {
+    if (pages.length) {
+      openPage(pages[0]);
+      scanAll(state.pageProfiles);
+    } else {
       $("#project-page-status").textContent =
         "專案中沒有可讀取的 HTML 頁面。目前已分析原始碼職責與模組；React／Vue 等動態畫面需先啟動或建置專案，無法只靠原始碼還原。";
       $("#input-panel").hidden = true;
@@ -275,6 +373,8 @@
     $("#project-detail").replaceChildren();
     $("#project-export").disabled = true;
     $("#project-notes").disabled = true;
+    $("#project-pages-overview").hidden = true;
+    state.pageProfiles = [];
     state.report = null;
     state.sources.clear();
     $("#project-cancel").hidden = false;
@@ -338,6 +438,7 @@
   };
   $("#project-page").onchange = (e) => openPage(e.target.value);
   $("#project-page-reanalyze").onclick = () => openPage($("#project-page").value);
+  $("#project-pages-cancel").onclick = () => state.batchController?.abort();
   $("#project-search").oninput = () => {
     if (state.report) renderTree();
   };
@@ -366,6 +467,21 @@
         f.role,
         ...f.evidence.map((e) => "- L" + e.line + "：" + e.text),
       );
+    }
+    if (r.page_analysis?.length) {
+      lines.push("", "## 所有 HTML 的分析結果");
+      for (const page of r.page_analysis)
+        lines.push(
+          "",
+          "### " + page.path,
+          page.title,
+          "入口線索：" + page.reasons.join("、"),
+          page.status === "done"
+            ? `HTML 元素 ${page.elements}；CSS 規則 ${page.css_rules}；JS 檔案 ${page.scripts}；缺少資源 ${page.missing.length}。`
+            : page.status === "error"
+              ? "分析失敗：" + page.error
+              : "狀態：" + page.status,
+        );
     }
     lines.push(
       "",

@@ -181,6 +181,12 @@
       warnings.push(...project.warnings);
       if(files.some(f=>f.preview_source!==undefined && f.preview_source!==f.source)) warnings.push('CSS @import 已從資料夾展開；匯入規則的行號以合併樣式估算，原檔可在專案地圖查看。');
     }
+    if (options.summaryOnly) return {
+      path:label, status:'done', elements:nodes.length, css_rules:rules.length,
+      scripts:files.filter(f=>f.kind==='js').length,
+      loaded:files.filter(f=>f.loaded).length, missing:files.filter(f=>!f.loaded).map(f=>f.label),
+      warnings:[...new Set(warnings)].slice(0,80)
+    };
     // Reconstruct snippets as strings only: never restore source resource URLs onto DOM nodes.
     const escapeAttr = value => String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
     const voidTags=new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);

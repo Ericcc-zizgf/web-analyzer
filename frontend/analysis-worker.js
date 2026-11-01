@@ -1,5 +1,6 @@
 /* Parsing only: page scripts are never evaluated. Prettier's bundled Babel parser builds an AST. */
 importScripts(
+  "learning-core.js",
   "vendor/standalone.js",
   "vendor/babel.js",
   "vendor/estree.js",
@@ -578,6 +579,27 @@ function inspect(ast, source) {
 self.onmessage = async (event) => {
   const { id, type } = event.data;
   try {
+    if (type === "teach") {
+      const source = event.data.source;
+      if (typeof source !== "string" || source.length > 200000)
+        throw Error("教學片段最多 200,000 字元，請改選較小的函式。");
+      const ast = await self.prettierPlugins.babel.parsers.babel.parse(source, {});
+      const result = self.LearningCore.explain(ast, source);
+      result.reference = self.LearningCore.methodMap;
+      if (event.data.simulation) {
+        const simulation = self.LearningCore.simulate(
+          ast,
+          event.data.simulation.index,
+          event.data.simulation.args,
+        );
+        result.simulation = {
+          ...simulation,
+          display: self.LearningCore.format(simulation.result),
+        };
+      }
+      self.postMessage({ id, result });
+      return;
+    }
     if (type === "format") {
       const { source, kind } = event.data;
       const parser =

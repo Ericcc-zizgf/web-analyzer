@@ -113,7 +113,8 @@ window.CSSLab = (() => {
       const matches = [];
       for (const selector of splitSelectors(rule.selector)) {
         try {
-          if (element.matches(selector.trim())) matches.push(specificity(selector.trim()));
+          if (element.matches(selector.trim()))
+            matches.push(specificity(selector.trim()));
         } catch {}
       }
       if (!matches.length) return;
@@ -217,7 +218,12 @@ window.CSSLab = (() => {
         make("dt", "直接父元素"),
         make(
           "dd",
-          identify(parent) + " · " + r.width.toFixed(1) + " × " + r.height.toFixed(1) + " px",
+          identify(parent) +
+            " · " +
+            r.width.toFixed(1) +
+            " × " +
+            r.height.toFixed(1) +
+            " px",
         ),
       );
     }
@@ -379,7 +385,9 @@ window.CSSLab = (() => {
           );
         if (item.file)
           card.append(
-            button("查看第 " + item.line + " 行", () => ctx.openSource(item.file, item.line)),
+            button("查看第 " + item.line + " 行", () =>
+              ctx.openSource(item.file, item.line),
+            ),
           );
         details.append(card);
       }
@@ -431,10 +439,14 @@ window.CSSLab = (() => {
           return;
         }
         if (/[{}]/.test(draft) || /url\s*\(|@import/i.test(draft)) {
-          feedback.textContent = "此練習區只接受一般 CSS 宣告，不接受規則區塊或外部資源。";
+          feedback.textContent =
+            "此練習區只接受一般 CSS 宣告，不接受規則區塊或外部資源。";
           return;
         }
-        const old = edits.get(node.id) || { original: element.getAttribute("style"), element };
+        const old = edits.get(node.id) || {
+          original: element.getAttribute("style"),
+          element,
+        };
         element.removeAttribute("style");
         if (old.original !== null) element.setAttribute("style", old.original);
         for (let i = 0; i < style.length; i++) {
@@ -484,7 +496,9 @@ window.CSSLab = (() => {
       editor.append(
         make(
           "p",
-          "已套用練習樣式。有效宣告：" + element.style.cssText + "（無效宣告會被瀏覽器忽略）",
+          "已套用練習樣式。有效宣告：" +
+            element.style.cssText +
+            "（無效宣告會被瀏覽器忽略）",
           "info-box",
         ),
       );
@@ -497,12 +511,26 @@ window.CSSLab = (() => {
         ),
       );
     box.append(editor);
+    window.TeachingGuide?.renderCSS(box, ctx, {
+      apply(key, value) {
+        const draft = document.createElement("div").style;
+        draft.cssText = textarea.value;
+        draft.setProperty(key, value);
+        textarea.value = draft.cssText;
+        textarea.oninput();
+        apply.click();
+      },
+      reset() {
+        reset.click();
+      },
+    });
   }
   return {
     render,
     reset: () => {
       edits.clear();
       drafts.clear();
+      window.TeachingGuide?.reset();
     },
   };
 })();

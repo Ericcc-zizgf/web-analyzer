@@ -91,7 +91,7 @@ async function api(path, options = {}) {
 }
 function workerCall(type, data) {
   if (!worker) {
-    worker = new Worker("/static/analysis-worker.js?v=20261102-canvas5");
+    worker = new Worker("/static/analysis-worker.js?v=20261102-learning1");
     worker.onmessage = (e) => {
       const task = pending.get(e.data.id);
       if (task) {
@@ -1021,6 +1021,9 @@ new ResizeObserver(() => {
 
 // Share the folder snapshot with the existing page workbench.
 window.PageWorkbench = {
+  explainJavaScript(source, simulation) {
+    return workerCall("teach", { source, simulation });
+  },
   formatComponentSource(source, kind = "html") {
     return workerCall("format", { source, kind });
   },

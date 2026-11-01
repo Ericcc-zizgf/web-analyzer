@@ -800,7 +800,18 @@
   componentCode.id = "component-code";
   componentCode.tabIndex = 0;
   componentCode.setAttribute("aria-label", "目前元件原始碼");
-  codePanel.append(codeToolbar, componentCode);
+  const jsLearning = make("section", "learning-panel component-js-learning");
+  jsLearning.id = "component-js-learning";
+  jsLearning.hidden = true;
+  const explainJS = (source) => {
+    jsLearning.hidden = false;
+    window.TeachingGuide.showJS(jsLearning, source, (text, simulation) =>
+      window.PageWorkbench.explainJavaScript(text, simulation),
+    );
+  };
+  const teachButton = button("解釋這段 JS", "", () => explainJS(detailSource));
+  codeToolbar.append(teachButton);
+  codePanel.append(codeToolbar, componentCode, jsLearning);
   const detailInspector = make("aside", "component-inspector");
   detailInspector.id = "component-inspector";
   columns.append(childPanel, codePanel, detailInspector);
@@ -841,6 +852,12 @@
   }
   function renderComponentFlow() {
     const graph = window.PageWorkbench.componentFlow();
+    const first =
+      graph.nodes.find((n) => n.kind === "functions") ||
+      graph.nodes.find((n) => n.kind === "bindings") ||
+      graph.nodes[0];
+    if (first) explainJS(first.source);
+    else jsLearning.hidden = true;
     flowWorld.replaceChildren();
     flowNote.textContent =
       "包含目前元件與子元素。連線表示事件綁定、函式呼叫或函式內包含，不代表實際執行順序。拖曳標題調整節點，點程式碼查看完整片段。" +
@@ -886,8 +903,10 @@
         ++detailRequest;
         detailSource = node.source;
         detailKind = "js";
+        teachButton.disabled = false;
         codeLabel.textContent = "JavaScript · " + node.file;
         componentCode.textContent = node.source;
+        explainJS(node.source);
         detailMeta.textContent =
           node.title + (node.line ? " · 第 " + node.line + " 行" : "");
         formatButton.disabled = false;
@@ -1028,6 +1047,7 @@
       childList.append(make("p", "component-leaf", "這是最內層元件，沒有其他子元素。"));
     detailSource = "";
     detailKind = "html";
+    teachButton.disabled = true;
     codeLabel.textContent = "目前元件的 HTML";
     componentCode.textContent = "正在讀取目前元件…";
     formatButton.disabled = true;
@@ -1090,6 +1110,9 @@
     ++detailRequest;
     detailSource = value.source;
     detailKind = value.kind;
+    teachButton.disabled = value.kind !== "js";
+    if (value.kind === "js") explainJS(value.source);
+    else jsLearning.hidden = true;
     codeLabel.textContent =
       (value.kind === "js" ? "JS" : value.kind === "css" ? "CSS" : "HTML") +
       " · " +

@@ -1,0 +1,24 @@
+const assert=require('node:assert/strict'),babel=require('../frontend/vendor/babel.js'),Core=require('../frontend/learning-core.js');
+const parse=s=>babel.parsers.babel.parse(s,{});
+(async()=>{
+ const source=`const button=document.querySelector('#save'); function sum(a,b){const total=a+b; return total;} button.addEventListener('click',sum);`;
+ const ast=await parse(source),lesson=Core.explain(ast,source);
+ assert.ok(lesson.steps.some(s=>s.title==='const button'&&s.text.includes('不能再用 =')));
+ assert.ok(lesson.steps.some(s=>s.title==='呼叫 document.querySelector'&&s.text.includes('找不到會得到 null')));
+ assert.ok(lesson.steps.some(s=>s.title==='呼叫 button.addEventListener'&&s.text.includes('不會立刻執行')));
+ assert.equal(Core.simulate(ast,0,[2,3]).result,5);
+ assert.ok(Core.simulate(ast,0,[2]).result.unknown);
+ const cond=await parse('function choice(x){if(x>3){return "big";}return "small";}');assert.equal(Core.simulate(cond,0,[4]).result,'big');assert.equal(Core.simulate(cond,0,[1]).result,'small');
+ const miss=await parse('function choice(x){if(x){return 1;}return 0;}');assert.equal(Core.simulate(miss,0,[]).result,0);
+ const scope=await parse('function run(x){if(true){const x=99;}return x;}');assert.equal(Core.simulate(scope,0,[2]).result,2);
+ const dom=await parse('function update(){document.querySelector("#x").textContent="changed";return 1;}');assert.ok(Core.simulate(dom,0,[]).result.unknown);
+ const loop=await parse('function run(){while(true){}return 1;}');assert.ok(Core.simulate(loop,0,[]).result.unknown);
+ const external=await parse('function run(a){return helper(a);}');assert.ok(Core.simulate(external,0,[1]).result.unknown);
+ const builtin=await parse('function run(a){return Number(a)+1;}');assert.equal(Core.simulate(builtin,0,['3']).result,4);
+ const shadow=await parse('function run(Number){return Number(2);}');assert.ok(Core.simulate(shadow,0,[3]).result.unknown);
+ const outerShadow=await parse('const Number=other;function run(){return Number(2);}');assert.ok(Core.simulate(outerShadow,0,[]).result.unknown);
+ const proto=await parse('function run(a){return a.constructor;}');assert.ok(Core.simulate(proto,0,[{}]).result.unknown);
+ const nan=await parse('function run(){return Number("no");}');assert.equal(Core.format(Core.simulate(nan,0,[]).result),'NaN');
+ assert.throws(()=>Core.simulate(ast,0,{}),/JSON/);
+ console.log('PASS AST const/DOM/event explanations; inputs, branches, local variables and returns; unknown values, DOM/external/loop refusal, builtin shadowing and prototype boundaries');
+})().catch(e=>{console.error(e);process.exit(1)});

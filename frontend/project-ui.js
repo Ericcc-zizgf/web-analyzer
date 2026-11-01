@@ -1,0 +1,323 @@
+/* Folder picker and project report, shared by Flask and Pages. */
+(function () {
+  "use strict";
+  const $ = (s) => document.querySelector(s);
+  const node = (tag, text, cls) => {
+    const n = document.createElement(tag);
+    if (text !== undefined) n.textContent = text;
+    if (cls) n.className = cls;
+    return n;
+  };
+  const state = {
+    report: null,
+    sources: new Map(),
+    selected: null,
+    worker: null,
+    serial: 0,
+    cancelTask: null,
+  };
+  const status = (text) => {
+    $("#project-status").textContent = text;
+  };
+  function stop() {
+    state.serial++;
+    state.worker?.terminate();
+    state.worker = null;
+    state.cancelTask?.();
+    state.cancelTask = null;
+    $("#project-cancel").hidden = true;
+  }
+  function download(data, name, type) {
+    const a = node("a");
+    const url = URL.createObjectURL(new Blob([data], { type }));
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function relation(link) {
+    return {
+      resolved: "已找到",
+      missing: "找不到檔案",
+      package: "套件依賴",
+      external: "外部網址／頁內定位",
+      unresolved: "待確認的別名／根路徑",
+      skipped: "已略過的檔案",
+    }[link.status];
+  }
+  function showFile(path) {
+    const report = state.report,
+      file = report.files.find((f) => f.path === path);
+    if (!file) return;
+    state.selected = path;
+    document
+      .querySelectorAll("#project-tree button")
+      .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.path === path)));
+    const panel = $("#project-detail");
+    panel.replaceChildren();
+    panel.append(
+      node("h3", file.path),
+      node("p", file.role, "project-role"),
+      node(
+        "p",
+        `${file.lines === null ? "未讀取文字" : file.lines + " 行"} · ${(file.size / 1024).toFixed(1)} KB`,
+        "muted",
+      ),
+    );
+    const section = (title, items) => {
+      panel.append(node("h4", title));
+      const ul = node("ul");
+      if (!items.length) ul.append(node("li", "沒有可確認的線索"));
+      for (const item of items)
+        ul.append(typeof item === "string" ? node("li", item) : item);
+      panel.append(ul);
+    };
+    section(
+      "判斷依據",
+      file.evidence.map((e) => `L${e.line}：${e.text}`),
+    );
+    section(
+      "函式與方法",
+      file.functions.map((f) => `L${f.line}：${f.async ? "async " : ""}${f.name}()`),
+    );
+    if (file.exports.length)
+      section(
+        "匯出項目",
+        file.exports.map((e) => `L${e.line}：${e.name}`),
+      );
+    section(
+      "這個檔案引用了什麼",
+      report.links
+        .filter((l) => l.from === path)
+        .map((link) => {
+          const li = node("li");
+          li.append(node("span", `L${link.line} · ${relation(link)} · `));
+          if (link.target) {
+            const b = node("button", link.target);
+            b.type = "button";
+            b.onclick = () => showFile(link.target);
+            li.append(b);
+          } else li.append(node("code", link.reference));
+          return li;
+        }),
+    );
+    section(
+      "哪些檔案引用它",
+      report.links
+        .filter((l) => l.target === path)
+        .map((link) => {
+          const li = node("li"),
+            b = node("button", link.from + ` · L${link.line}`);
+          b.type = "button";
+          b.onclick = () => showFile(link.from);
+          li.append(b);
+          return li;
+        }),
+    );
+    if (file.diagnostics.length) section("解析限制與錯誤", file.diagnostics);
+    const source = state.sources.get(path);
+    if (source !== null && source !== undefined) {
+      const details = node("details");
+      details.append(node("summary", "查看原始碼（最多顯示 60,000 字元）"));
+      const pre = node("pre");
+      pre.append(node("code", source.slice(0, 60000)));
+      details.append(pre);
+      panel.append(details);
+    }
+  }
+  function renderTree() {
+    const query = $("#project-search").value.trim().toLowerCase();
+    const files = state.report.files.filter((f) =>
+      (f.path + " " + f.role).toLowerCase().includes(query),
+    );
+    const tree = $("#project-tree");
+    tree.replaceChildren();
+    const directories = new Map([["", tree]]);
+    for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+      const parts = file.path.split("/");
+      let parent = "",
+        container = tree;
+      for (const part of parts.slice(0, -1)) {
+        const key = parent ? parent + "/" + part : part;
+        if (!directories.has(key)) {
+          const d = node("details");
+          d.open = !!query || key.split("/").length < 2;
+          d.append(node("summary", part + "/"));
+          const box = node("div", undefined, "project-folder");
+          d.append(box);
+          container.append(d);
+          directories.set(key, box);
+        }
+        parent = key;
+        container = directories.get(key);
+      }
+      const b = node("button", parts.at(-1));
+      b.type = "button";
+      b.dataset.path = file.path;
+      b.title = file.role;
+      b.setAttribute("aria-pressed", String(state.selected === file.path));
+      b.onclick = () => showFile(file.path);
+      container.append(b);
+    }
+    if (!files.length) tree.append(node("p", "沒有符合的檔案。"));
+  }
+  function render() {
+    const r = state.report;
+    $("#project-results").hidden = false;
+    $("#project-export").disabled = false;
+    $("#project-notes").disabled = false;
+    $("#project-title").textContent = r.root + " · 專案地圖";
+    $("#project-summary").textContent =
+      `${r.files.length} 個檔案 · ${r.entries.length} 個入口候選 · ${r.links.filter((l) => l.status === "resolved").length} 條已確認引用 · ${r.skipped.length} 個略過`;
+    const overview = $("#project-overview");
+    overview.replaceChildren();
+    overview.append(
+      node(
+        "p",
+        "辨識到的套件技術：" +
+          (r.frameworks.join("、") || "未找到支援辨識的 package.json 套件"),
+      ),
+    );
+    const start = node("p", "建議先看：");
+    for (const path of r.entries.slice(0, 8)) {
+      const b = node("button", path);
+      b.type = "button";
+      b.onclick = () => showFile(path);
+      start.append(b);
+    }
+    if (!r.entries.length)
+      start.append(node("span", "尚未辨識入口，可從 README 或 package.json 開始。"));
+    overview.append(start);
+    const notices = $("#project-notices");
+    notices.replaceChildren();
+    for (const limit of r.limitations) notices.append(node("li", limit));
+    const missing = r.links.filter((l) => l.status === "missing");
+    if (missing.length)
+      notices.append(
+        node("li", `${missing.length} 個相對引用找不到檔案，請點選各檔案查看路徑。`),
+      );
+    const details = $("#project-skipped");
+    details.replaceChildren(node("summary", `略過檔案與原因 · ${r.skipped.length}`));
+    const ul = node("ul");
+    for (const item of r.skipped.slice(0, 200))
+      ul.append(node("li", item.path + "：" + item.reason));
+    if (r.skipped.length > 200)
+      ul.append(node("li", "清單只顯示前 200 筆，完整清單可匯出 JSON。"));
+    details.append(ul);
+    $("#project-search").value = "";
+    renderTree();
+    showFile(
+      r.entries[0] ||
+        r.files.find((f) => /readme/i.test(f.path))?.path ||
+        r.files[0]?.path,
+    );
+    status("專案分析完成。點選左側檔案，查看職責、函式與引用關係。");
+  }
+  async function run(files) {
+    stop();
+    const serial = state.serial;
+    $("#project-results").hidden = true;
+    $("#project-detail").replaceChildren();
+    $("#project-export").disabled = true;
+    $("#project-notes").disabled = true;
+    state.report = null;
+    state.sources.clear();
+    $("#project-cancel").hidden = false;
+    status("正在讀取資料夾…");
+    try {
+      const input = await ProjectCore.collect(
+        files,
+        (n, total) => status(`正在讀取檔案 ${n} / ${total}…`),
+        () => serial !== state.serial,
+      );
+      if (serial !== state.serial) return;
+      if (!input.entries.length)
+        throw Error("沒有可分析的檔案；請選擇包含原始碼的專案資料夾。");
+      state.sources = new Map(input.entries.map((e) => [e.path, e.source]));
+      status("正在分析結構、職責與檔案引用…");
+      const worker = new Worker(new URL("project-worker.js", scriptURL));
+      state.worker = worker;
+      const report = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          worker.terminate();
+          reject(Error("分析超過 60 秒，請改選較小的專案資料夾。"));
+        }, 60000);
+        state.cancelTask = () => {
+          clearTimeout(timer);
+          reject(Error("已取消分析"));
+        };
+        worker.onmessage = (e) => {
+          clearTimeout(timer);
+          e.data.error ? reject(Error(e.data.error)) : resolve(e.data.report);
+        };
+        worker.onerror = () => {
+          clearTimeout(timer);
+          reject(Error("專案解析器無法啟動，請透過本機伺服器開啟網頁。"));
+        };
+        worker.postMessage(input);
+      });
+      worker.terminate();
+      if (serial !== state.serial) return;
+      state.worker = null;
+      state.report = report;
+      render();
+    } catch (e) {
+      if (serial === state.serial) status(e.message);
+    } finally {
+      if (serial === state.serial) {
+        state.worker?.terminate();
+        state.worker = null;
+        state.cancelTask = null;
+        $("#project-cancel").hidden = true;
+        $("#project-folder").value = "";
+      }
+    }
+  }
+  const scriptURL = document.currentScript.src;
+  $("#project-folder").onchange = (e) => {
+    if (e.target.files.length) run([...e.target.files]);
+  };
+  $("#project-cancel").onclick = () => {
+    stop();
+    status("已取消。重新選擇資料夾即可分析。");
+  };
+  $("#project-search").oninput = () => {
+    if (state.report) renderTree();
+  };
+  $("#project-export").onclick = () => {
+    if (state.report)
+      download(
+        JSON.stringify(state.report, null, 2),
+        "project-analysis.json",
+        "application/json",
+      );
+  };
+  $("#project-notes").onclick = () => {
+    const r = state.report;
+    if (!r) return;
+    const lines = [
+      "# " + r.root + " 專案說明",
+      "",
+      ...r.limitations.map((s) => "> " + s),
+      "",
+      "## 檔案職責",
+    ];
+    for (const f of r.files) {
+      lines.push(
+        "",
+        "### " + f.path,
+        f.role,
+        ...f.evidence.map((e) => "- L" + e.line + "：" + e.text),
+      );
+    }
+    lines.push(
+      "",
+      "## 檔案引用",
+      ...r.links.map(
+        (l) =>
+          "- " + l.from + " → " + (l.target || l.reference) + "（" + relation(l) + "）",
+      ),
+    );
+    download(lines.join("\n"), "project-notes.md", "text/markdown");
+  };
+})();

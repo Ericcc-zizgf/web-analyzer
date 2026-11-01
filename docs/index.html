@@ -8,6 +8,9 @@
     <script src="./css-lab.js" defer></script>
     <script src="./static-analyzer.js" defer></script>
     <script src="./app.js" defer></script>
+    <link rel="stylesheet" href="./project.css">
+    <script src="./project-core.js" defer></script>
+    <script src="./project-ui.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -24,6 +27,23 @@
       </div>
     </header>
     <main>
+      <section class="project-panel" aria-labelledby="project-heading">
+        <div class="project-heading"><div><p class="eyebrow">從整個專案開始</p>
+          <h2 id="project-heading">選一個資料夾，看懂每個檔案的分工。</h2>
+          <p class="muted">自動整理資料夾結構、檔案職責、函式與引用關係。選取後立即分析，檔案只在瀏覽器處理。</p></div>
+        </div>
+        <label for="project-folder">選擇網頁專案資料夾</label>
+        <input id="project-folder" type="file" webkitdirectory multiple>
+        <p class="muted">支援 HTML、CSS、JS／TS、React、Python 與設定檔。自動略過 node_modules、.git、.env、vendor 與建置產物。單檔 768 KB、文字合計 16 MB，最多分析 1,500 個檔案。</p>
+        <div class="project-actions"><button id="project-cancel" type="button" hidden>取消專案分析</button><button id="project-export" type="button" disabled>下載專案 JSON</button><button id="project-notes" type="button" disabled>下載專案說明 Markdown</button></div>
+        <p id="project-status" role="status" aria-live="polite">先選擇專案資料夾，或繼續使用下方的單頁分析。</p>
+        <div id="project-results" hidden>
+          <h3 id="project-title"></h3><p id="project-summary"></p><div id="project-overview"></div>
+          <div class="project-workspace"><nav class="project-navigation" aria-label="專案檔案"><label for="project-search">搜尋檔案或職責</label><input id="project-search" type="search" placeholder="例如 app.js、樣式、測試"><div id="project-tree"></div></nav><article id="project-detail" aria-label="檔案職責與引用"></article></div>
+          <h4>分析範圍與待確認項目</h4><ul id="project-notices"></ul><details id="project-skipped"></details>
+        </div>
+      </section>
+
       <section class="input-panel" id="input-panel">
         <div class="input-heading">
           <div>

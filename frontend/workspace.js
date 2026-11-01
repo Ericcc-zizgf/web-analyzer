@@ -337,6 +337,239 @@
   zoomTools.append(zoomOut, zoomLabel, zoomIn, fit, reset);
   canvas.append(zoomTools);
   const nodes = [source, pages, tree, inspector, preview];
+  const frame = $("#preview");
+  let previewMode = "full",
+    previewFullPage = false,
+    previewHeight = 490;
+  const previewSizeNote = make(
+    "output",
+    "preview-size-note",
+    "預覽尺寸跟隨卡片；拖曳右下角調整",
+  );
+  const previewSizing = make("div", "preview-sizing");
+  const expandPage = button("展開整頁", "", () => {
+    previewFullPage = !previewFullPage;
+    updatePreviewSize();
+  });
+  expandPage.setAttribute("aria-pressed", "false");
+  const fitPreview = button("縮放看全頁", "fit", () => {
+    if (!previewFullPage) {
+      previewFullPage = true;
+      updatePreviewSize();
+    }
+    viewTouched = true;
+    scale = Math.max(
+      0.02,
+      Math.min(
+        1,
+        (canvas.clientWidth - 80) / preview.el.offsetWidth,
+        (canvas.clientHeight - world.offsetTop - 110) / preview.el.offsetHeight,
+      ),
+    );
+    tx =
+      (canvas.clientWidth - preview.el.offsetWidth * scale) / 2 -
+      preview.el.offsetLeft * scale;
+    ty = 30 - preview.el.offsetTop * scale;
+    transform();
+  });
+  previewSizing.append(previewSizeNote, expandPage, fitPreview);
+  viewer.querySelector(".viewer-toolbar").after(previewSizing);
+  const desktopButton = make("button", "", "桌面");
+  desktopButton.type = "button";
+  desktopButton.dataset.width = "1440";
+  desktopButton.title = "桌面寬度 1440px";
+  desktopButton.setAttribute("aria-pressed", "false");
+  $(".width-tabs").insertBefore(desktopButton, $('[data-width="768"]'));
+  function previewOverhead() {
+    return (
+      preview.heading.offsetHeight +
+      viewer.querySelector(".viewer-toolbar").offsetHeight +
+      previewSizing.offsetHeight +
+      viewer.querySelector(".preview-notice").offsetHeight +
+      viewer.querySelector(".selection-path").offsetHeight +
+      inspectActions.offsetHeight +
+      15
+    );
+  }
+  function setCardSize(node, width, height) {
+    node.el.classList.add("is-sized");
+    node.el.style.width =
+      Math.round(Math.max(node === preview ? 320 : 240, Math.min(2600, width))) + "px";
+    node.el.style.height =
+      Math.round(Math.max(node === preview ? 360 : 200, Math.min(24000, height))) + "px";
+    reflow();
+    drawEdges();
+  }
+  function refreshPreviewNote() {
+    previewSizeNote.textContent =
+      Math.round(frame.clientWidth) +
+      " × " +
+      Math.round(frame.clientHeight) +
+      " px" +
+      (previewFullPage ? " · 整頁高度" : " · 視窗高度") +
+      "；外層畫布可獨立縮放";
+  }
+  function updatePreviewSize() {
+    viewer.querySelector('[data-view="preview"]').click();
+    if (previewMode !== "full") preview.el.style.width = Number(previewMode) + 30 + "px";
+    preview.el.style.setProperty("--preview-height", previewHeight + 2 + "px");
+    if (previewFullPage) {
+      try {
+        frame.style.setProperty("height", "1px", "important");
+        const doc = frame.contentDocument;
+        const height = Math.max(
+          previewHeight,
+          doc?.documentElement.scrollHeight || 0,
+          doc?.body?.scrollHeight || 0,
+        );
+        preview.el.style.setProperty(
+          "--preview-height",
+          Math.min(23000, height + 2) + "px",
+        );
+      } catch {
+      } finally {
+        frame.style.removeProperty("height");
+      }
+    }
+    setCardSize(
+      preview,
+      preview.el.offsetWidth,
+      parseFloat(preview.el.style.getPropertyValue("--preview-height")) +
+        previewOverhead(),
+    );
+    expandPage.textContent = previewFullPage ? "還原視窗高度" : "展開整頁";
+    expandPage.setAttribute("aria-pressed", String(previewFullPage));
+    refreshPreviewNote();
+    preview.el.style.height =
+      parseFloat(preview.el.style.getPropertyValue("--preview-height")) +
+      previewOverhead() +
+      "px";
+    reflow();
+  }
+  for (const control of document.querySelectorAll("[data-width]"))
+    control.addEventListener("click", () => {
+      previewMode = control.dataset.width;
+      previewHeight =
+        previewMode === "768"
+          ? 1024
+          : previewMode === "375"
+            ? 812
+            : previewMode === "1440"
+              ? 900
+              : 490;
+      document
+        .querySelectorAll("[data-width]")
+        .forEach((b) => b.setAttribute("aria-pressed", String(b === control)));
+      frame.style.width = "100%";
+      updatePreviewSize();
+    });
+  frame.addEventListener("load", () => {
+    if (manualDialog.open && !$("#results").hidden) manualDialog.close();
+    if (previewFullPage) updatePreviewSize();
+    else refreshPreviewNote();
+  });
+  for (const node of nodes) {
+    const resetSize = make("button", "node-size-reset", "↺");
+    resetSize.type = "button";
+    resetSize.title = "還原卡片大小";
+    resetSize.setAttribute(
+      "aria-label",
+      "還原" + node.heading.querySelector("h2").textContent + "卡片大小",
+    );
+    resetSize.onclick = () => {
+      node.el.classList.remove("is-sized");
+      node.el.style.height = "";
+      node.el.style.width = (node === source ? 280 : node === preview ? 610 : 300) + "px";
+      if (node === preview) {
+        previewMode = "full";
+        previewFullPage = false;
+        previewHeight = 490;
+        node.el.style.removeProperty("--preview-height");
+        frame.style.width = "100%";
+        expandPage.textContent = "展開整頁";
+        expandPage.setAttribute("aria-pressed", "false");
+        document
+          .querySelectorAll("[data-width]")
+          .forEach((b) =>
+            b.setAttribute("aria-pressed", String(b.dataset.width === "full")),
+          );
+        refreshPreviewNote();
+      }
+      reflow();
+      drawEdges();
+    };
+    node.heading.append(resetSize);
+    const grip = make("button", "node-resize-handle", "◢");
+    grip.type = "button";
+    grip.setAttribute(
+      "aria-label",
+      "調整" + node.heading.querySelector("h2").textContent + "卡片大小",
+    );
+    grip.title = "拖曳調整大小，或用方向鍵調整寬高";
+    node.el.append(grip);
+    const resizeCard = (width, height) => {
+      if (node === preview) {
+        const overhead = previewOverhead();
+        previewMode = "full";
+        previewFullPage = false;
+        previewHeight = Math.max(120, height - overhead);
+        node.el.style.setProperty("--preview-height", previewHeight + "px");
+        frame.style.width = "100%";
+        expandPage.textContent = "展開整頁";
+        expandPage.setAttribute("aria-pressed", "false");
+        document
+          .querySelectorAll("[data-width]")
+          .forEach((b) =>
+            b.setAttribute("aria-pressed", String(b.dataset.width === "full")),
+          );
+      }
+      setCardSize(node, width, height);
+      if (node === preview) {
+        const minimum = previewOverhead() + 122;
+        if (node.el.offsetHeight < minimum) node.el.style.height = minimum + "px";
+        previewHeight = node.el.offsetHeight - previewOverhead() - 2;
+        node.el.style.setProperty("--preview-height", previewHeight + 2 + "px");
+        refreshPreviewNote();
+        reflow();
+      }
+    };
+    grip.onpointerdown = (e) => {
+      if (
+        e.button !== 0 ||
+        matchMedia("(max-width:760px)").matches ||
+        document.body.classList.contains("canvas-list")
+      )
+        return;
+      e.preventDefault();
+      e.stopPropagation();
+      viewTouched = true;
+      const x = e.clientX,
+        y = e.clientY,
+        width = node.el.offsetWidth,
+        height = node.el.offsetHeight,
+        resizeScale = scale;
+      grip.setPointerCapture(e.pointerId);
+      grip.onpointermove = (ev) =>
+        resizeCard(
+          width + (ev.clientX - x) / resizeScale,
+          height + (ev.clientY - y) / resizeScale,
+        );
+      grip.onpointerup = grip.onpointercancel = () => {
+        grip.onpointermove = null;
+      };
+    };
+    grip.onkeydown = (e) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      resizeCard(
+        node.el.offsetWidth +
+          (e.key === "ArrowRight" ? 40 : e.key === "ArrowLeft" ? -40 : 0),
+        node.el.offsetHeight +
+          (e.key === "ArrowDown" ? 40 : e.key === "ArrowUp" ? -40 : 0),
+      );
+    };
+  }
   function transform() {
     world.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
     zoomLabel.value = Math.round(scale * 100) + "%";
@@ -344,7 +577,8 @@
   }
   function zoom(value, x = canvas.clientWidth / 2, y = canvas.clientHeight / 2) {
     viewTouched = true;
-    const next = Math.max(0.5, Math.min(1.5, value));
+    y -= world.offsetTop;
+    const next = Math.max(0.02, Math.min(2, value));
     tx = x - ((x - tx) * next) / scale;
     ty = y - ((y - ty) * next) / scale;
     scale = next;
@@ -362,8 +596,12 @@
     const right = Math.max(...nodes.map((n) => n.el.offsetLeft + n.el.offsetWidth)) + 40;
     const bottom = Math.max(...nodes.map((n) => n.el.offsetTop + n.el.offsetHeight)) + 60;
     scale = Math.max(
-      0.5,
-      Math.min(1, (canvas.clientWidth - 60) / right, (canvas.clientHeight - 90) / bottom),
+      0.02,
+      Math.min(
+        1,
+        (canvas.clientWidth - 60) / right,
+        (canvas.clientHeight - world.offsetTop - 100) / bottom,
+      ),
     );
     tx = 30;
     ty = 20;
@@ -408,6 +646,7 @@
       document.body.classList.contains("canvas-list")
     )
       return;
+    if (e.target.closest(".node-resize-handle,.node-size-reset")) return;
     const heading = e.target.closest(".flow-node-heading");
     if (!heading && e.target.closest(".flow-node,button,a,input,select,textarea")) return;
     viewTouched = true;

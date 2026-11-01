@@ -15,17 +15,43 @@
     worker: null,
     serial: 0,
     cancelTask: null,
+    pageSerial: 0,
   };
   const status = (text) => {
     $("#project-status").textContent = text;
   };
   function stop() {
     state.serial++;
+    state.pageSerial++;
+    window.PageWorkbench?.cancel();
     state.worker?.terminate();
     state.worker = null;
     state.cancelTask?.();
     state.cancelTask = null;
     $("#project-cancel").hidden = true;
+  }
+  async function openPage(path) {
+    if (!state.report || !path) return;
+    const serial = ++state.pageSerial;
+    const projectSerial = state.serial;
+    $("#project-page").value = path;
+    $("#project-page-link").hidden = true;
+    $("#project-page-status").textContent =
+      "正在分析 " + path + " 的 HTML、CSS 與 JavaScript…";
+    $("#input-panel").hidden = true;
+    document.body.classList.add("input-collapsed");
+    $("#toggle-input").textContent = "改用單頁分析";
+    $("#toggle-input").setAttribute("aria-expanded", "false");
+    const ok = await window.PageWorkbench.analyzeProject({
+      entry: path,
+      sources: state.sources,
+      report: state.report,
+    });
+    if (serial !== state.pageSerial || projectSerial !== state.serial) return;
+    $("#project-page-status").textContent = ok
+      ? "已分析「" + path + "」，下方可直接查看畫面、HTML 結構、CSS 與 JavaScript。"
+      : "這個頁面未完成分析：" + window.PageWorkbench.lastStatus();
+    $("#project-page-link").hidden = !ok;
   }
   function download(data, name, type) {
     const a = node("a");
@@ -64,6 +90,12 @@
         "muted",
       ),
     );
+    if (/^html?$/.test(file.kind)) {
+      const button = node("button", "直接分析這個網頁 ↓");
+      button.type = "button";
+      button.onclick = () => openPage(path);
+      panel.append(button);
+    }
     const section = (title, items) => {
       panel.append(node("h4", title));
       const ul = node("ul");
@@ -164,6 +196,8 @@
   function render() {
     const r = state.report;
     $("#project-results").hidden = false;
+    $("#project-map").hidden = false;
+    $("#project-page-controls").hidden = false;
     $("#project-export").disabled = false;
     $("#project-notes").disabled = false;
     $("#project-title").textContent = r.root + " · 專案地圖";
@@ -211,12 +245,33 @@
         r.files.find((f) => /readme/i.test(f.path))?.path ||
         r.files[0]?.path,
     );
-    status("專案分析完成。點選左側檔案，查看職責、函式與引用關係。");
+    const pages = ProjectPage.pages(r, state.sources);
+    $("#project-page").replaceChildren(
+      ...pages.map((path) => {
+        const option = node("option", path);
+        option.value = path;
+        return option;
+      }),
+    );
+    $("#project-page-picker").hidden = !pages.length;
+    $("#project-page-link").hidden = true;
+    if (pages.length) openPage(pages[0]);
+    else {
+      $("#project-page-status").textContent =
+        "專案中沒有可讀取的 HTML 頁面。目前已分析原始碼職責與模組；React／Vue 等動態畫面需先啟動或建置專案，無法只靠原始碼還原。";
+      $("#input-panel").hidden = true;
+      $("#empty-state").hidden = true;
+    }
+    status("專案分析完成。已沿用資料夾內的檔案，不需要再次上傳。");
   }
   async function run(files) {
     stop();
     const serial = state.serial;
+    window.PageWorkbench.reset();
+    $("#project-page-controls").hidden = true;
     $("#project-results").hidden = true;
+    $("#project-map").hidden = true;
+    $("#project-map").open = false;
     $("#project-detail").replaceChildren();
     $("#project-export").disabled = true;
     $("#project-notes").disabled = true;
@@ -281,6 +336,8 @@
     stop();
     status("已取消。重新選擇資料夾即可分析。");
   };
+  $("#project-page").onchange = (e) => openPage(e.target.value);
+  $("#project-page-reanalyze").onclick = () => openPage($("#project-page").value);
   $("#project-search").oninput = () => {
     if (state.report) renderTree();
   };

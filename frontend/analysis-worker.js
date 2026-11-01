@@ -90,7 +90,9 @@ function inspect(ast, source) {
           name: fnName,
           kind: node.type,
           async: !!node.async,
-          params: (node.params || []).map((p) => source.slice(p.start, p.end).slice(0, 100)),
+          params: (node.params || []).map((p) =>
+            source.slice(p.start, p.end).slice(0, 100),
+          ),
         },
         node,
       );
@@ -153,7 +155,11 @@ function inspect(ast, source) {
           );
           if (field) method = literal(field.value) || "動態方法";
         }
-        add("network", { api: "fetch", url: literal(args[0]) || "動態 URL", method }, node);
+        add(
+          "network",
+          { api: "fetch", url: literal(args[0]) || "動態 URL", method },
+          node,
+        );
       }
       if (/^axios\.(get|post|put|patch|delete|request)$/.test(callee))
         add(
@@ -305,7 +311,8 @@ function inspect(ast, source) {
     for (const item of items) {
       const targets = new Set();
       if (item.target) targets.add(item.target);
-      if (kind === "selectors" && item.selector !== "動態選擇器") targets.add(item.selector);
+      if (kind === "selectors" && item.selector !== "動態選擇器")
+        targets.add(item.selector);
       if (kind === "functions")
         for (const selector of fnTargets.get(item)) targets.add(selector);
       else if (!["events", "selectors", "imports"].includes(kind)) {
@@ -327,7 +334,13 @@ self.onmessage = async (event) => {
     if (type === "format") {
       const { source, kind } = event.data;
       const parser =
-        kind === "js" ? "babel" : kind === "css" ? "css" : kind === "data" ? "json" : "html";
+        kind === "js"
+          ? "babel"
+          : kind === "css"
+            ? "css"
+            : kind === "data"
+              ? "json"
+              : "html";
       const result = await self.prettier.format(source, {
         parser,
         plugins: Object.values(self.prettierPlugins),
@@ -340,7 +353,11 @@ self.onmessage = async (event) => {
     const results = [];
     for (const file of event.data.files) {
       try {
-        const ast = await self.prettierPlugins.babel.parsers.babel.parse(file.source, {});
+        const parser = /\.tsx?(?:[?#]|$)/i.test(file.label || "") ? "babel-ts" : "babel";
+        const ast = await self.prettierPlugins.babel.parsers[parser].parse(
+          file.source,
+          {},
+        );
         results.push({ id: file.id, ...inspect(ast, file.source) });
       } catch (error) {
         results.push({

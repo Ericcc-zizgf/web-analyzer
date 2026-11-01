@@ -90,7 +90,7 @@ async function api(path, options = {}) {
 }
 function workerCall(type, data) {
   if (!worker) {
-    worker = new Worker("./analysis-worker.js");
+    worker = new Worker("./analysis-worker.js?v=20261102");
     worker.onmessage = (e) => {
       const task = pending.get(e.data.id);
       if (task) {
@@ -146,8 +146,14 @@ function label(node) {
     (node.attrs.class ? " ." + node.attrs.class.split(/\s+/).slice(0, 2).join(".") : "")
   );
 }
-async function analyze() {
+async function analyze(projectInput = null) {
   const run = ++runSerial;
+  if (projectInput) {
+    $("#results").hidden = true;
+    $("#export-report").disabled = true;
+    $("#preview").srcdoc = "";
+    report = null;
+  }
   controller?.abort();
   stopWorker();
   controller = new AbortController();
@@ -156,7 +162,10 @@ async function analyze() {
   status("正在讀取 HTML 與資源，這可能需要數十秒…");
   try {
     let options = { method: "POST", signal: controller.signal };
-    if (mode === "url") {
+    if (projectInput) {
+      options.body = new FormData();
+      options.project = projectInput;
+    } else if (mode === "url") {
       options.headers = { "Content-Type": "application/json" };
       options.body = JSON.stringify({
         mode,
@@ -177,7 +186,9 @@ async function analyze() {
       for (const file of $("#asset-files").files) form.append("assets", file);
       options.body = form;
     }
-    const result = await api("/api/analyze", options);
+    const result = projectInput
+      ? await window.StaticAnalyzer.route("/api/analyze", options)
+      : await api("/api/analyze", options);
     if (run !== runSerial) return;
     window.CSSLab.reset();
     report = result;
@@ -209,13 +220,16 @@ async function analyze() {
     if (scripts.length)
       try {
         jsResults = await workerCall("analyze", {
-          files: scripts.map((f) => ({ id: f.id, source: f.source })),
+          files: scripts.map((f) => ({ id: f.id, source: f.source, label: f.label })),
         });
       } catch (error) {
         if (run === runSerial) report.warnings.push(error.message);
       }
     if (run !== runSerial) return;
     for (const result of jsResults) {
+      if (report.project)
+        for (const item of result.imports || [])
+          item.kind = "模組依賴（本機檔案已嘗試展開）";
       const file = report.files.find((f) => f.id === result.id);
       if (result.error)
         report.warnings.push(file.label + "：JS 語法無法解析（" + result.error + "）");
@@ -223,7 +237,7 @@ async function analyze() {
         report.warnings.push(
           file.label + "：部分語法清單超過 160 筆顯示上限；計數仍列出解析總數。",
         );
-      if (result.imports?.length)
+      if (result.imports?.length && !report.project)
         report.warnings.push(file.label + "：發現 import／模組依賴，此版本不展開。");
     }
     const good = jsResults.filter((r) => !r.error);
@@ -236,9 +250,11 @@ async function analyze() {
     renderWarnings();
     renderInspector();
     status("分析完成。點選 HTML 元素，或切換 CSS／JavaScript 查看來源。");
+    return true;
   } catch (error) {
     if (run === runSerial)
       status(error.name === "AbortError" ? "已取消分析。" : error.message, true);
+    return false;
   } finally {
     if (run === runSerial) {
       $("#analyze").disabled = false;
@@ -249,7 +265,9 @@ async function analyze() {
 function renderWarnings() {
   const notes = [
     "這是靜態原始碼分析；原頁 JavaScript 不執行，動態 DOM、登入後內容與程式執行結果不在本次分析中。",
-    "安全預覽只套用已取得的 HTML／CSS，外部圖片、字型、CSS @import 與 JS import 依賴未展開。",
+    report.project
+      ? "已使用資料夾中的 HTML／CSS／JS 與可解析的本機依賴；來源程式不執行，圖片與字型不載入。"
+      : "安全預覽只套用已取得的 HTML／CSS，外部圖片、字型、CSS @import 與 JS import 依賴未展開。",
     ...report.warnings,
   ];
   $("#warnings-title").textContent = "分析範圍與讀取紀錄 · " + notes.length + " 項";
@@ -284,7 +302,9 @@ function renderTree() {
       ? btn("", () => {
           expanded.has(n.id) ? expanded.delete(n.id) : expanded.add(n.id);
           renderTree();
-          document.querySelector(`[data-toggle="${n.id}"]`)?.focus({ preventScroll: true });
+          document
+            .querySelector(`[data-toggle="${n.id}"]`)
+            ?.focus({ preventScroll: true });
         })
       : el("span", "", "tree-leaf");
     if (n.children.length) {
@@ -464,7 +484,8 @@ function conditionState(rule, win) {
   let unknown = false;
   for (const c of rule.conditions) {
     try {
-      if (c.type === "media" && !win.matchMedia(c.condition).matches) return "目前尺寸不符合";
+      if (c.type === "media" && !win.matchMedia(c.condition).matches)
+        return "目前尺寸不符合";
       if (c.type === "supports" && !win.CSS.supports(c.condition)) return "瀏覽器不支援";
       if (!["media", "supports", "layer"].includes(c.type)) unknown = true;
     } catch {
@@ -548,7 +569,11 @@ function renderCSS(box, node) {
       area.append(el("p", "偽元素及 :hover 等狀態可能不在這份相符清單。", "muted"));
     for (const rule of chosen.slice(0, 70)) {
       const state = conditionState(rule, win),
-        card = el("div", undefined, "rule-card" + (state === "條件符合" ? "" : " inactive"));
+        card = el(
+          "div",
+          undefined,
+          "rule-card" + (state === "條件符合" ? "" : " inactive"),
+        );
       card.append(el("code", rule.selector));
       if (rule.conditions.length)
         card.append(
@@ -563,7 +588,10 @@ function renderCSS(box, node) {
         el(
           "pre",
           rule.declarations
-            .map((d) => d.property + ": " + d.value + (d.important ? " !important" : "") + ";")
+            .map(
+              (d) =>
+                d.property + ": " + d.value + (d.important ? " !important" : "") + ";",
+            )
             .join("\n"),
         ),
       );
@@ -676,13 +704,16 @@ function renderJS(box, node) {
       }
       if (file.kind === "data") {
         if (all)
-          area.append(el("p", file.label + "：資料腳本，不屬於元素的互動程式。", "info-box"));
+          area.append(
+            el("p", file.label + "：資料腳本，不屬於元素的互動程式。", "info-box"),
+          );
         continue;
       }
       if (parsed.truncated?.length) incomplete = true;
       const items = parsed[category.value] || [];
       const relevant = items.filter(
-        (item) => all || (item.relatedTargets || [item.target || item.selector]).some(matches),
+        (item) =>
+          all || (item.relatedTargets || [item.target || item.selector]).some(matches),
       );
       omitted += items.length - relevant.length;
       for (const item of relevant.slice(0, 60)) {
@@ -854,7 +885,8 @@ document.querySelectorAll("[data-inspect]").forEach(
 document.querySelectorAll("[data-width]").forEach(
   (b) =>
     (b.onclick = () => {
-      $("#preview").style.width = b.dataset.width === "full" ? "100%" : b.dataset.width + "px";
+      $("#preview").style.width =
+        b.dataset.width === "full" ? "100%" : b.dataset.width + "px";
       document
         .querySelectorAll("[data-width]")
         .forEach((item) => item.setAttribute("aria-pressed", item === b));
@@ -975,3 +1007,25 @@ new ResizeObserver(() => {
     if (report && inspectTab === "css") renderInspector();
   }, 120);
 }).observe($("#preview"));
+
+// Share the folder snapshot with the existing page workbench.
+window.PageWorkbench = {
+  analyzeProject(input) {
+    return analyze(input);
+  },
+  lastStatus() {
+    return document.querySelector("#status").textContent;
+  },
+  cancel() {
+    document.querySelector("#cancel").click();
+  },
+  reset() {
+    this.cancel();
+    report = null;
+    window.CSSLab.reset();
+    document.querySelector("#results").hidden = true;
+    document.querySelector("#empty-state").hidden = true;
+    document.querySelector("#export-report").disabled = true;
+    document.querySelector("#preview").srcdoc = "";
+  },
+};

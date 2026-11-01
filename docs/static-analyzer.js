@@ -78,7 +78,7 @@
       if (tag.localName === 'link') {
         const file = filesByNode.get(tag.getAttribute('data-web-analyzer-node'));
         if (file?.kind === 'css' && file.loaded) {
-          const style = safe.createElement('style'); style.textContent = file.source.replace(/</g, '\\3c ');
+          const style = safe.createElement('style'); style.textContent = (file.preview_source ?? file.source).replace(/</g, '\\3c ');
           style.setAttribute('data-web-analyzer-node', tag.getAttribute('data-web-analyzer-node'));
           const media = file.media; if (media) style.setAttribute('media', media);
           tag.replaceWith(style);
@@ -89,7 +89,7 @@
       for (const attr of [...tag.attributes]) {
         if (!allowedAttrs.has(attr.name) && !attr.name.startsWith('aria-')) tag.removeAttribute(attr.name);
       }
-      if (tag.localName === 'style') tag.textContent = tag.textContent.replace(/</g, '\\3c ');
+      if (tag.localName === 'style') { const file=filesByNode.get(tag.getAttribute('data-web-analyzer-node')); tag.textContent = (file?.preview_source ?? tag.textContent).replace(/</g, '\\3c '); }
       if (tag.localName === 'img' && !tag.getAttribute('alt')) tag.setAttribute('alt','圖片（安全預覽不載入外部資源）');
     }
     const csp = safe.createElement('meta');
@@ -102,6 +102,7 @@
     if (options.signal?.aborted) throw new DOMException('已取消', 'AbortError');
     const input = options.body;
     if (!(input instanceof FormData)) throw Error('Pages 版請貼上或上傳 HTML；網址讀取需要 Python 本機版。');
+    const project = options.project ? ProjectPage.create(options.project) : null;
     const companions = new Map();
     const assets = input.getAll('assets');
     if (assets.length > 12) throw Error('附加 CSS／JS 最多 12 份。');
@@ -112,8 +113,8 @@
       if (companions.has(file.name)) throw Error('附加檔案同名：' + file.name);
       total += file.size; companions.set(file.name, await file.text());
     }
-    let html = String(input.get('html') || ''), label = '貼上的 HTML';
-    const main = input.get('html_file');
+    let html = project ? project.html : String(input.get('html') || ''), label = project ? project.entry : '貼上的 HTML';
+    const main = project ? null : input.get('html_file');
     if (main instanceof File) {
       if (main.size > 2*1024*1024) throw Error('HTML 限制 2 MB。');
       html = await main.text(); label = main.name;
@@ -139,6 +140,9 @@
       for (const [key,code] of Object.entries(attrs)) if (/^on./i.test(key)) inlineEvents.push({event:key.slice(2),target_node:id,target:attrs.id?'#'+attrs.id:tag.localName,code,line:null,kind:'HTML 事件屬性'});
     }
     const files=[],rules=[],filesByNode=new Map();
+    const baseHref = nodes.find(n=>n.tag==='base')?.attrs.href;
+    const scriptRoots = [];
+    if(project) { warnings.splice(0,1,'資料夾網頁分析：直接使用已選取的 HTML／CSS／JS，不需再次上傳。'); warnings[2]='安全預覽不載入圖片或外部資源；CSS／JS 已自動從所選資料夾對應。'; warnings.push('JS 模組只做靜態解析，不執行 React／Vue 等框架；動態產生的畫面無法由 HTML 還原。'); }
     for (const node of nodes) {
       const tag=tags.find(t=>ids.get(t)===node.id),attrs=node.attrs;
       const kind=node.tag==='style'||(node.tag==='link'&&/\bstylesheet\b/i.test(attrs.rel||''))?'css':node.tag==='script'?'js':null;
@@ -146,19 +150,36 @@
       if (files.length >= 60) throw Error('樣式／腳本區塊最多 60 份。');
       const ref=node.tag==='link'?attrs.href:attrs.src;
       const id='f'+(files.length+1);
-      let source=tag.textContent, error=null;
+      let source=tag.textContent, error=null, projectPath=null;
       if (ref) {
         let name=ref.split(/[?#]/)[0].split('/').pop();
         try { name=decodeURIComponent(name); } catch (_) { /* malformed URL stays unavailable */ }
-        source=companions.get(name);
-        if (source===undefined) error='未附加此檔案；Pages 版不自動讀取外部資源。';
+        if(project) { const asset=project.asset(ref,baseHref); source=asset.source; projectPath=asset.path; }
+        else source=companions.get(name);
+        if (source===undefined) error=project?'資料夾中沒有可載入的對應檔案，或已超出分析限制。':'未附加此檔案；Pages 版不自動讀取外部資源。';
       }
       const type=(attrs.type||'').toLowerCase();
       const dataScript=kind==='js'&&!['','module','text/javascript','application/javascript','text/ecmascript','application/ecmascript'].includes(type);
-      const file={id,kind:dataScript?'data':kind,label:ref||`內嵌 ${kind==='css'?'CSS':'JavaScript'} #${files.length+1}`,url:null,source:source||'',loaded:source!==undefined,error,node:node.id,line:null,inline:!ref,module:type==='module',type,media:attrs.media||''};
+      const file={id,kind:dataScript?'data':kind,label:projectPath||ref||`內嵌 ${kind==='css'?'CSS':'JavaScript'} #${files.length+1}`,url:null,source:source||'',loaded:source!==undefined,error,node:node.id,line:null,inline:!ref,module:type==='module',type,media:attrs.media||''};
+      if(project && kind==='css' && file.loaded) file.preview_source=project.expandCSS(file.source,projectPath||project.entry);
+      if(project && kind==='js' && projectPath && file.loaded) {scriptRoots.push(projectPath);project.loadedScripts.add(projectPath);}
       files.push(file); filesByNode.set(node.id,file);
       if (error) warnings.push(file.label+'：'+error);
-      if (kind==='css'&&file.loaded) rules.push(...parseCSS(file.source,id,attrs.media&&attrs.media!=='all'?[{type:'media',condition:attrs.media}]:[],warnings));
+      if (kind==='css'&&file.loaded) rules.push(...parseCSS(file.preview_source ?? file.source,id,attrs.media&&attrs.media!=='all'?[{type:'media',condition:attrs.media}]:[],warnings));
+    }
+    if(project) {
+      for(const dependency of project.scripts(scriptRoots)) {
+        const id='f'+(files.length+1);
+        if(files.length>=60){project.warnings.push('樣式／腳本分析最多 60 份，部分模組未加入。');break;}
+        const file={id,kind:dependency.kind,label:dependency.path,url:null,source:dependency.source,loaded:true,error:null,node:null,line:null,inline:false,module:dependency.kind==='js',type:'module',dependency:true};
+        files.push(file);
+        if(file.kind==='css') {
+          // Imports in JS are listed for source inspection. Bundler-specific CSS order is unknown.
+          warnings.push(file.label+'：由 JS 匯入的樣式只列出來源；預覽不猜測打包器的套用順序。');
+        }
+      }
+      warnings.push(...project.warnings);
+      if(files.some(f=>f.preview_source!==undefined && f.preview_source!==f.source)) warnings.push('CSS @import 已從資料夾展開；匯入規則的行號以合併樣式估算，原檔可在專案地圖查看。');
     }
     // Reconstruct snippets as strings only: never restore source resource URLs onto DOM nodes.
     const escapeAttr = value => String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -180,7 +201,7 @@
     }
     const preview=sanitizePreview(doc,filesByNode);
     const id=crypto.randomUUID(); cache.set(id,sources); while(cache.size>3)cache.delete(cache.keys().next().value);
-    return {id,source_label:label,base_url:null,html,nodes,files,css_rules:rules,inline_events:inlineEvents,warnings:[...new Set(warnings)].slice(0,80),preview,stats:{elements:nodes.length,css_rules:rules.length,scripts:files.filter(f=>f.kind==='js').length,stylesheets:files.filter(f=>f.kind==='css').length,inline_styles:nodes.filter(n=>n.attrs.style).length}};
+    return {id,project:!!project,source_label:label,base_url:null,html,nodes,files,css_rules:rules,inline_events:inlineEvents,warnings:[...new Set(warnings)].slice(0,80),preview,stats:{elements:nodes.length,css_rules:rules.length,scripts:files.filter(f=>f.kind==='js').length,stylesheets:files.filter(f=>f.kind==='css').length,inline_styles:nodes.filter(n=>n.attrs.style).length}};
   }
   window.StaticAnalyzer = { async route(path,options={}) {
     if (path==='/api/analyze') return analyze(options);

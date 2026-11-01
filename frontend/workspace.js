@@ -840,16 +840,18 @@
     detailSource = "",
     detailKind = "html",
     previousFocus = null;
-  let flowScale = 1;
+  let flowScale = 1,
+    currentFunctionFlow = null;
   function changeFlowScale(delta) {
-    flowScale = Math.max(0.5, Math.min(1.5, flowScale + delta));
+    flowScale = Math.max(0.25, Math.min(1.5, flowScale + delta));
     flowWorld.style.transform = `scale(${flowScale})`;
     flowScaleLabel.textContent = Math.round(flowScale * 100) + "%";
     flowSpace.style.width = Number(flowWorld.dataset.width || 1000) * flowScale + "px";
     flowSpace.style.height = Number(flowWorld.dataset.height || 400) * flowScale + "px";
   }
-  function renderComponentFlow() {
-    const graph = window.PageWorkbench.componentFlow();
+  function renderComponentFlow(input) {
+    if (input) currentFunctionFlow = input;
+    const graph = currentFunctionFlow || { nodes: [], edges: [], warnings: [] };
     const first =
       graph.nodes.find((n) => n.kind === "functions") ||
       graph.nodes.find((n) => n.kind === "bindings") ||
@@ -858,7 +860,7 @@
     else jsLearning.hidden = true;
     flowWorld.replaceChildren();
     flowNote.textContent =
-      "包含目前元件與子元素。連線表示事件綁定、函式呼叫或函式內包含，不代表實際執行順序。拖曳標題調整節點，點程式碼查看完整片段。" +
+      "從取得元件的變數，接到事件與完整函式。實線表示已確認關聯，虛線表示可能相關；點函式定位原檔並框選整段程式碼。" +
       (graph.warnings.length ? " · " + graph.warnings.join("；") : "");
     if (!graph.nodes.length) {
       flowCanvas.hidden = true;
@@ -881,7 +883,7 @@
         timers: 3,
         bindings: 0,
       },
-      bottoms = [40, 40, 40, 40];
+      bottoms = Array(9).fill(40);
     for (const node of graph.nodes) {
       const card = make("article", "component-flow-node");
       card.dataset.kind = node.kind;
@@ -896,8 +898,22 @@
       const snippet = make("button", "component-flow-snippet");
       snippet.type = "button";
       snippet.setAttribute("aria-label", "查看 " + node.title + " 的完整程式碼");
-      snippet.append(make("pre", "", node.source));
+      snippet.append(
+        make(
+          "pre",
+          "",
+          node.source.length > 8000
+            ? node.source.slice(0, 8000) + "\n… 點選查看完整函式"
+            : node.source,
+        ),
+      );
       snippet.onclick = () => {
+        if (node.record) {
+          window.dispatchEvent(
+            new CustomEvent("locator:open-block", { detail: node.record }),
+          );
+          return;
+        }
         ++detailRequest;
         detailSource = node.source;
         detailKind = "js";
@@ -914,7 +930,7 @@
       card.append(heading, meta, snippet);
       if (node.note) card.append(make("p", "flow-unresolved", node.note));
       flowWorld.append(card);
-      const column = categories[node.kind] ?? 3;
+      const column = node.column ?? categories[node.kind] ?? 3;
       card.style.left = 35 + column * 340 + "px";
       card.style.top = bottoms[column] + "px";
       bottoms[column] += card.offsetHeight + 60;
@@ -963,7 +979,7 @@
     }
     function draw() {
       const width = Math.max(
-          1380,
+          600,
           ...cards.map((c) => c.el.offsetLeft + c.el.offsetWidth + 40),
         ),
         height = Math.max(
@@ -977,6 +993,21 @@
       edges.setAttribute("width", width);
       edges.setAttribute("height", height);
       edges.replaceChildren();
+      const defs = document.createElementNS(edges.namespaceURI, "defs"),
+        marker = document.createElementNS(edges.namespaceURI, "marker"),
+        arrow = document.createElementNS(edges.namespaceURI, "path");
+      marker.id = "component-flow-arrow";
+      marker.setAttribute("viewBox", "0 0 10 10");
+      marker.setAttribute("refX", "9");
+      marker.setAttribute("refY", "5");
+      marker.setAttribute("markerWidth", "6");
+      marker.setAttribute("markerHeight", "6");
+      marker.setAttribute("orient", "auto-start-reverse");
+      arrow.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+      arrow.setAttribute("fill", "#9ab7a5");
+      marker.append(arrow);
+      defs.append(marker);
+      edges.append(defs);
       const map = new Map(cards.map((c) => [c.id, c.el]));
       for (const edge of graph.edges) {
         const a = map.get(edge.from),
@@ -987,7 +1018,14 @@
           tx = b.offsetLeft,
           ty = b.offsetTop + 25;
         const path = document.createElementNS(edges.namespaceURI, "path");
-        path.setAttribute("d", `M${x} ${y} C${x + 60} ${y} ${tx - 60} ${ty} ${tx} ${ty}`);
+        path.setAttribute(
+          "d",
+          edge.from === edge.to
+            ? `M${x} ${y} C${x + 90} ${y - 85} ${tx - 90} ${ty - 85} ${tx} ${ty}`
+            : `M${x} ${y} C${x + 60} ${y} ${tx - 60} ${ty} ${tx} ${ty}`,
+        );
+        path.setAttribute("marker-end", "url(#component-flow-arrow)");
+        if (edge.certainty === "possible") path.setAttribute("stroke-dasharray", "5 5");
         const title = document.createElementNS(edges.namespaceURI, "title");
         title.textContent = edge.label;
         path.append(title);
@@ -999,6 +1037,20 @@
     flowCanvas.scrollTop = 0;
     flowCanvas.scrollLeft = 0;
   }
+  window.addEventListener("locator:function-flow", (event) =>
+    renderComponentFlow(event.detail),
+  );
+  const fitFunctions = button("適合畫面", "fit", () => {
+    flowScale = Math.max(
+      0.25,
+      Math.min(
+        1,
+        (flowCanvas.clientWidth - 12) / Number(flowWorld.dataset.width || 1000),
+      ),
+    );
+    changeFlowScale(0);
+  });
+  flowTop.append(fitFunctions);
   async function openComponent(id) {
     const selected = id
       ? window.PageWorkbench.selectComponent(id)
@@ -1050,6 +1102,10 @@
     componentCode.textContent = "正在讀取目前元件…";
     formatButton.disabled = true;
     copyButton.disabled = true;
+    currentFunctionFlow = null;
+    flowWorld.replaceChildren();
+    flowCanvas.hidden = true;
+    flowNote.textContent = "正在整理元件變數與完整函式…";
     window.dispatchEvent(
       new CustomEvent("analyzer:component", { detail: { id: selected.id } }),
     );

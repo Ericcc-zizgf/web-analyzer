@@ -3,6 +3,7 @@ importScripts(
   "vendor/babel.js",
   "vendor/postcss.js",
   "locator-core.js" + self.location.search,
+  "function-flow.js" + self.location.search,
 );
 let index = null;
 self.onmessage = async (event) => {
@@ -36,7 +37,17 @@ self.onmessage = async (event) => {
       });
     } else if (type === "query") {
       if (!index) throw Error("原始碼索引尚未建立");
-      self.postMessage({ id, result: LocatorCore.query(index, event.data.selection) });
+      const result = LocatorCore.query(index, event.data.selection);
+      const flow = FunctionFlow.project(index, result);
+      self.postMessage({
+        id,
+        result: {
+          ...result,
+          results: flow.results,
+          flow: { nodes: flow.nodes, edges: flow.edges },
+          detailCount: flow.detailCount,
+        },
+      });
     }
   } catch (e) {
     self.postMessage({ id, error: e.message });

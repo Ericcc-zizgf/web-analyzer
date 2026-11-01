@@ -165,7 +165,15 @@
   }
   function show(record) {
     current = record;
-    sourceTitle.textContent = record.file + ":" + record.line + ":" + record.column;
+    sourceTitle.textContent =
+      record.file +
+      ":" +
+      record.line +
+      ":" +
+      record.column +
+      (record.type === "function"
+        ? " · 完整函式（" + record.line + "–" + record.endLine + " 行）"
+        : "");
     sourceMeta.textContent =
       (names[record.type] || record.type) +
       " · " +
@@ -187,7 +195,9 @@
         lines.length,
         Math.max(
           record.line + 10,
-          Math.min(record.endLine || record.line, record.line + 180),
+          record.type === "function"
+            ? record.endLine || record.line
+            : Math.min(record.endLine || record.line, record.line + 180),
         ),
       );
     sourceCode.replaceChildren();
@@ -371,18 +381,46 @@
         context()?.node.id !== ctx.node.id
       )
         return;
+      data.results = data.results.filter((r) => r.type !== "text");
       result = data;
+      const graph = data.flow || { nodes: [], edges: [] };
+      const shown = graph.nodes.slice(0, 100),
+        shownIDs = new Set(shown.map((n) => n.id));
+      window.dispatchEvent(
+        new CustomEvent("locator:function-flow", {
+          detail: {
+            nodes: shown.map((r) => ({
+              ...r,
+              record: r,
+              kind:
+                r.type === "function"
+                  ? "functions"
+                  : ["event", "inline-event"].includes(r.type)
+                    ? "events"
+                    : r.type === "selector"
+                      ? "selectors"
+                      : "bindings",
+              title:
+                r.type === "function"
+                  ? "function " + r.name
+                  : ["event", "inline-event"].includes(r.type)
+                    ? "事件 · " + (r.event || r.name)
+                    : "取得元件 · " + r.name,
+              source: (window.LocatorIndex.source(r.file) || "").slice(r.start, r.end),
+              note: r.certainty === "possible" ? "可能相關，尚未確認執行時目標" : "",
+            })),
+            edges: graph.edges.filter((e) => shownIDs.has(e.from) && shownIDs.has(e.to)),
+            warnings:
+              graph.nodes.length > 100
+                ? ["畫布先顯示 100 個區塊；下方函式清單仍保留其他結果。"]
+                : [],
+          },
+        }),
+      );
       status.textContent =
         "找到 " +
-        data.results.filter((r) => r.certainty === "confirmed").length +
-        " 個已確認位置、" +
-        data.results.filter((r) => r.certainty === "possible").length +
-        " 個可能相關位置。" +
-        (seedIDs.length
-          ? "目前由指定符號繼續追查。"
-          : "目前元件：" +
-            ctx.node.tag +
-            (ctx.node.attrs.id ? " #" + ctx.node.attrs.id : ""));
+        data.results.filter((r) => r.type === "function").length +
+        " 個完整函式；函式內的參數、字串與語句已收在函式內，不另拆成結果。";
       renderCoverage(data);
       draw();
       if (data.results.length)
@@ -494,6 +532,17 @@
       ],
     });
   });
+  window.addEventListener("locator:open-block", (event) => {
+    show(event.detail);
+    sourcePanel.scrollIntoView({ block: "start" });
+  });
+  toolbar.append(
+    button("回到 JavaScript 流程圖", () =>
+      document
+        .querySelector(".component-flow-section")
+        .scrollIntoView({ block: "start" }),
+    ),
+  );
   window.addEventListener("analyzer:component", () => run());
   window.addEventListener("locator:state", (event) => {
     if (event.detail.phase === "empty") {

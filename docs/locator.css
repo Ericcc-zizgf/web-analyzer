@@ -1,5 +1,4 @@
 /* Source locations are the primary product; teaching and normalized snippets stay out of this view. */
-.location-product .component-workspace > .component-flow-section,
 .location-product .component-workspace > .component-columns {
   display: none !important;
 }
@@ -470,4 +469,11 @@ body.component-mode .canvas-nav .canvas-button.active {
   background: transparent;
   color: #aebbb3;
   box-shadow: none;
+}
+
+.location-product .component-flow-section {
+  margin-top: 18px;
+}
+.component-flow-edges defs path {
+  stroke: none;
 }

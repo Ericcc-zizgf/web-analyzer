@@ -90,7 +90,7 @@ async function api(path, options = {}) {
 }
 function workerCall(type, data) {
   if (!worker) {
-    worker = new Worker("./analysis-worker.js?v=20261102-bugfix1");
+    worker = new Worker("./analysis-worker.js?v=20261102-canvas5");
     worker.onmessage = (e) => {
       const task = pending.get(e.data.id);
       if (task) {
@@ -392,7 +392,7 @@ $("#preview").addEventListener("load", () => {
   if (!doc?.head) return;
   const style = doc.createElement("style");
   style.textContent =
-    "[data-analyzer-selected]{outline:2px solid #548d4d!important;outline-offset:-2px!important;}";
+    "[data-analyzer-selected]{outline:3px solid #16834b!important;outline-offset:2px!important;box-shadow:0 0 0 5px #ffffffcc!important;}";
   doc.head.append(style);
   doc.addEventListener("click", (event) => {
     event.preventDefault();
@@ -825,6 +825,17 @@ async function openSource(id, line = 1) {
           (file.inline ? "內嵌區塊，行號從此區塊第 1 行算起" : "取得的原始檔案")
         : file?.error || "無法取得此檔案";
   renderSource(line);
+  window.dispatchEvent(
+    new CustomEvent("analyzer:source", {
+      detail: {
+        analysisId: report.id,
+        kind: id === "html" ? "html" : file?.kind || "html",
+        label: id === "html" ? "HTML 原始檔" : file?.label || id,
+        source: rawText,
+        line,
+      },
+    }),
+  );
 }
 function renderSource(line = 0) {
   const pre = $("#source-code");
@@ -1010,6 +1021,70 @@ new ResizeObserver(() => {
 
 // Share the folder snapshot with the existing page workbench.
 window.PageWorkbench = {
+  formatComponentSource(source, kind = "html") {
+    return workerCall("format", { source, kind });
+  },
+  componentFlow(id = selected) {
+    const target = (() => {
+      try {
+        return document
+          .querySelector("#preview")
+          .contentDocument?.querySelector('[data-web-analyzer-node="' + id + '"]');
+      } catch {
+        return null;
+      }
+    })();
+    if (!report || !target)
+      return { nodes: [], edges: [], warnings: ["請等待預覽載入完成。"] };
+    return window.ComponentFlow.build(report, jsResults, (selector, nodeId) => {
+      if (nodeId) {
+        const element = document
+          .querySelector("#preview")
+          .contentDocument?.querySelector('[data-web-analyzer-node="' + nodeId + '"]');
+        return Boolean(element && target.contains(element));
+      }
+      try {
+        return Boolean(
+          selector && (target.matches(selector) || target.querySelector(selector)),
+        );
+      } catch {
+        return false;
+      }
+    });
+  },
+  component(id = selected) {
+    if (!report || !nodeMap.has(id)) return null;
+    const node = nodeMap.get(id),
+      ancestors = [];
+    let parent = node;
+    while (parent) {
+      ancestors.unshift({ id: parent.id, label: label(parent) });
+      parent = nodeMap.get(parent.parent);
+    }
+    return {
+      analysisId: report.id,
+      id: node.id,
+      label: label(node),
+      text: node.text,
+      parent: node.parent,
+      ancestors,
+      children: node.children.map((child) => ({
+        id: child,
+        label: label(nodeMap.get(child)),
+        text: nodeMap.get(child)?.text || "",
+      })),
+    };
+  },
+  selectComponent(id) {
+    if (report && nodeMap.has(id)) selectNode(id);
+    return this.component();
+  },
+  async componentSource(id = selected) {
+    if (!report || !nodeMap.has(id)) throw Error("目前沒有可讀取的元件。");
+    const analysisId = report.id;
+    const result = await api("/api/analysis/" + analysisId + "/node/" + id);
+    return { ...result, analysisId, id };
+  },
   analyzeProject(input) {
     return analyze(input);
   },

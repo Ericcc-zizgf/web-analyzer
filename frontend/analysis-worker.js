@@ -154,6 +154,8 @@ function mutatedBindings(ast) {
 function inspect(ast, source) {
   const lists = {
       functions: [],
+      calls: [],
+      bindings: [],
       events: [],
       selectors: [],
       network: [],
@@ -165,6 +167,11 @@ function inspect(ast, source) {
     counts = Object.fromEntries(Object.keys(lists).map((k) => [k, 0]));
   const bindingInfo = mutatedBindings(ast);
   const uncertainBindings = bindingInfo.mutated;
+  const variableKinds = new WeakMap();
+  const functionBindings = new Map(),
+    declarationBindings = new Map(),
+    references = [],
+    identifierUses = [];
   let visited = 0;
   const add = (kind, record, node) => {
     counts[kind]++;
@@ -204,6 +211,11 @@ function inspect(ast, source) {
   function walk(node, env = new Map(), label = "") {
     if (!node || typeof node !== "object" || !node.type) return;
     if (++visited > 350000) throw Error("語法樹節點超過分析上限");
+    if (node.type === "VariableDeclaration")
+      for (const declaration of node.declarations)
+        variableKinds.set(declaration, node.kind);
+    if (node.type === "Identifier" && identifierUses.length < 10000)
+      identifierUses.push(node);
     const functionNode = [
       "FunctionDeclaration",
       "FunctionExpression",
@@ -213,6 +225,7 @@ function inspect(ast, source) {
       "ClassPrivateMethod",
     ].includes(node.type);
     if (functionNode) {
+      if (node.id) functionBindings.set(node.id, node.start);
       const fnName = node.id?.name || node.key?.name || label || "匿名回呼";
       add(
         "functions",
@@ -260,6 +273,19 @@ function inspect(ast, source) {
         env.delete(key);
     }
     if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") {
+      if (["FunctionExpression", "ArrowFunctionExpression"].includes(node.init?.type))
+        functionBindings.set(node.id, node.init.start);
+      if (
+        node.init &&
+        !["FunctionExpression", "ArrowFunctionExpression"].includes(node.init.type)
+      ) {
+        declarationBindings.set(node.id, node.start);
+        add(
+          "bindings",
+          { name: node.id.name, declarationKind: variableKinds.get(node) },
+          node,
+        );
+      }
       const resolved = uncertainBindings.has(node.id) ? null : target(node.init, env);
       if (resolved) env.set(node.id.name, resolved);
       else env.delete(node.id.name);
@@ -277,7 +303,14 @@ function inspect(ast, source) {
       const callee = name(node.callee),
         property = node.callee?.property?.name || literal(node.callee?.property),
         args = node.arguments || [];
-      if (property === "addEventListener")
+      if (callee && property !== "addEventListener") {
+        add("calls", { name: callee }, node);
+        references.push({
+          record: lists.calls.find((item) => item.start === node.start),
+          ref: node.callee,
+        });
+      }
+      if (property === "addEventListener") {
         add(
           "events",
           {
@@ -290,6 +323,15 @@ function inspect(ast, source) {
           },
           node,
         );
+        const record = lists.events.find((item) => item.start === node.start);
+        if (args[1]?.type === "Identifier")
+          references.push({ record, ref: args[1], event: true });
+        else if (
+          record &&
+          ["FunctionExpression", "ArrowFunctionExpression"].includes(args[1]?.type)
+        )
+          record.resolvedHandlerStart = args[1].start;
+      }
       if (
         callee.startsWith("document.") &&
         [
@@ -395,7 +437,7 @@ function inspect(ast, source) {
           },
           node,
         );
-      if (property?.startsWith("on"))
+      if (property?.startsWith("on")) {
         add(
           "events",
           {
@@ -408,6 +450,15 @@ function inspect(ast, source) {
           },
           node,
         );
+        const record = lists.events.find((item) => item.start === node.start);
+        if (node.right?.type === "Identifier")
+          references.push({ record, ref: node.right, event: true });
+        else if (
+          record &&
+          ["FunctionExpression", "ArrowFunctionExpression"].includes(node.right?.type)
+        )
+          record.resolvedHandlerStart = node.right.start;
+      }
     }
     for (const [key, value] of Object.entries(node)) {
       if (
@@ -440,6 +491,50 @@ function inspect(ast, source) {
     }
   }
   walk(ast.program || ast);
+  // Resolve only immutable lexical function bindings. A matching name alone is not proof.
+  for (const { record, ref, event } of references) {
+    if (!record) continue;
+    let scope = bindingInfo.scopes.get(ref);
+    while (scope && !scope.bindings.has(ref.name)) scope = scope.parent;
+    const bindings = scope?.bindings.get(ref.name);
+    if (bindings?.size !== 1) continue;
+    const binding = [...bindings][0];
+    if (uncertainBindings.has(binding) || !functionBindings.has(binding)) continue;
+    record[event ? "resolvedHandlerStart" : "resolvedStart"] =
+      functionBindings.get(binding);
+  }
+  const dependencies = [];
+  for (const ref of identifierUses) {
+    let scope = bindingInfo.scopes.get(ref);
+    while (scope && !scope.bindings.has(ref.name)) scope = scope.parent;
+    const bindings = scope?.bindings.get(ref.name);
+    if (bindings?.size !== 1) continue;
+    const binding = [...bindings][0];
+    if (declarationBindings.has(binding) && !uncertainBindings.has(binding))
+      dependencies.push({
+        start: ref.start,
+        end: ref.end,
+        bindingStart: declarationBindings.get(binding),
+      });
+  }
+  for (const item of [
+    ...lists.functions,
+    ...lists.events,
+    ...lists.bindings,
+    ...lists.selectors,
+  ])
+    item.dependencyStarts = [
+      ...new Set(
+        dependencies
+          .filter(
+            (ref) =>
+              ref.start >= item.start &&
+              ref.end <= item.end &&
+              ref.bindingStart !== item.start,
+          )
+          .map((ref) => ref.bindingStart),
+      ),
+    ];
   // Associate by exact AST ranges, never by snippet text or substring matching.
   const owner = (item) =>
     lists.functions
@@ -453,17 +548,9 @@ function inspect(ast, source) {
   }
   for (const event of lists.events) {
     if (!event.target) continue;
-    let handlers = lists.functions.filter(
-      (fn) => fn.start === event.handlerStart && fn.end === event.handlerEnd,
+    const handlers = lists.functions.filter(
+      (fn) => fn.start === event.resolvedHandlerStart,
     );
-    if (!handlers.length && !["匿名回呼", "函式／動態指定"].includes(event.handler)) {
-      handlers = lists.functions.filter(
-        (fn) =>
-          fn.name === event.handler &&
-          !["ObjectMethod", "ClassMethod", "ClassPrivateMethod"].includes(fn.kind),
-      );
-      if (handlers.length !== 1) handlers = [];
-    }
     for (const fn of handlers) fnTargets.get(fn).add(event.target);
   }
   for (const [kind, items] of Object.entries(lists))
@@ -482,6 +569,7 @@ function inspect(ast, source) {
     }
   return {
     ...lists,
+    dependenciesTruncated: identifierUses.length >= 10000,
     counts,
     visited,
     truncated: Object.keys(lists).filter((k) => counts[k] > lists[k].length),

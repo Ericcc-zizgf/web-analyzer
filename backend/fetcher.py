@@ -12,9 +12,12 @@ class AnalysisError(Exception):
 
 def parse_url(value):
     if not isinstance(value,str) or len(value)>3000:raise AnalysisError('網址格式不正確')
-    value=urldefrag(value.strip())[0]
+    # urllib normalizes tabs/newlines, so reject them before parsing.
+    if any(ord(char)<32 or ord(char)==127 for char in value):raise AnalysisError('網址包含不合法字元')
     try:
-        parts=urlsplit(value);port=parts.port or (443 if parts.scheme=='https' else 80)
+        value=urldefrag(value.strip())[0]
+        parts=urlsplit(value);explicit_port=parts.port
+        port=explicit_port if explicit_port is not None else (443 if parts.scheme=='https' else 80)
     except ValueError:raise AnalysisError('網址或埠號格式不正確')
     if parts.scheme not in ('http','https') or not parts.hostname or parts.username or parts.password:
         raise AnalysisError('請使用不含帳號密碼的 http:// 或 https:// 網址')

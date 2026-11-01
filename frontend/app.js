@@ -91,7 +91,7 @@ async function api(path, options = {}) {
 }
 function workerCall(type, data) {
   if (!worker) {
-    worker = new Worker("/static/analysis-worker.js?v=20261102-auto");
+    worker = new Worker("/static/analysis-worker.js?v=20261102-bugfix1");
     worker.onmessage = (e) => {
       const task = pending.get(e.data.id);
       if (task) {

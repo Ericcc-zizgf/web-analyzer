@@ -22,6 +22,7 @@ HTML 依頁面標題與資源標籤辨識；CSS 依選擇器、@media、@import 
 
 兩份介面共用相同的資料夾分析模組：
 
+- `source-utils.js`：不執行來源的 HTML 標籤與 CSS import tokenizer，供 Worker、引用圖與預覽共用。
 - `project-core.js`：檔案排除、大小限制、靜態分析、職責與引用解析；亦供 Node 測試。
 - `project-worker.js`：在 Worker 載入隨專案提供的 Babel parser，避免解析佔住 UI 執行緒。
 - `project-ui.js`：資料夾選取、取消、目錄樹、詳情、搜尋、頁面切換與報告匯出。
@@ -56,3 +57,5 @@ Python 測試需要先依 requirements.txt 安裝依賴。資料夾核心測試�
 所有可讀取的 HTML 都會依序解析 HTML 結構、CSS 規則與本機 JS 模組依賴；分析列表顯示完成、缺失資源或解析錯誤，單頁失敗不影響其他頁。各外部 JS 原始碼的函式／事件線索已在專案結構階段掃描；選取一頁時，再執行該頁完整的 JavaScript 工作台解析，包括內嵌腳本與元素關聯。
 
 整批分析可取消；換資料夾時停止舊批次。背景摘要不保存預覽或 HTML 片段快取，因此不會使目前開啟頁面的「元素片段」過期。JSON 與 Markdown 匯出含各頁摘要與入口評分線索；匯出進行中時會保留尚未完成的狀態。檔案數量、容量及每頁解析上限仍適用，已略過或無法讀取的 HTML 不算可分析頁面。
+
+解析清單被截斷時，會另外保留總數與診斷；JS 中可能重賦值或受到同名變數遮蔽的 DOM 目標會保守列為不確定。最新修復證據見 [BUGFIX-VERIFICATION.md](BUGFIX-VERIFICATION.md)。

@@ -24,7 +24,8 @@ def create_app(config=None):
     def local():
         if request.host.split(':')[0] not in ('127.0.0.1','localhost'):raise AnalysisError('僅供本機使用',403)
         if request.method=='POST':
-            if request.headers.get('Origin') not in (None,request.host_url.rstrip('/')) or not secrets.compare_digest(request.headers.get('X-Analyzer-Token',''),token):raise AnalysisError('請從本機分析器頁面操作',403)
+            supplied_token=request.headers.get('X-Analyzer-Token','')
+            if request.headers.get('Origin') not in (None,request.host_url.rstrip('/')) or not supplied_token.isascii() or not secrets.compare_digest(supplied_token,token):raise AnalysisError('請從本機分析器頁面操作',403)
     @app.after_request
     def headers(response):
         response.headers['Cache-Control']='no-store';response.headers['X-Content-Type-Options']='nosniff';response.headers['Referrer-Policy']='no-referrer'

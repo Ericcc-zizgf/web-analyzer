@@ -26,6 +26,131 @@ function name(node) {
     );
   return "";
 }
+function bindingIdentifiers(pattern, ids = []) {
+  if (!pattern) return ids;
+  if (pattern.type === "Identifier") ids.push(pattern);
+  else if (pattern.type === "RestElement") bindingIdentifiers(pattern.argument, ids);
+  else if (pattern.type === "AssignmentPattern") bindingIdentifiers(pattern.left, ids);
+  else if (pattern.type === "ArrayPattern")
+    for (const item of pattern.elements) bindingIdentifiers(item, ids);
+  else if (pattern.type === "ObjectPattern")
+    for (const item of pattern.properties)
+      bindingIdentifiers(item.type === "RestElement" ? item.argument : item.value, ids);
+  else if (pattern.type === "TSParameterProperty")
+    bindingIdentifiers(pattern.parameter, ids);
+  return ids;
+}
+// Find bindings that may be reassigned, including writes in nested closures.
+// A static inspector must not keep an old DOM target when execution order is unknown.
+function mutatedBindings(ast) {
+  const scopes = new WeakMap(),
+    mutated = new WeakSet();
+  const root = { parent: null, functionScope: true, bindings: new Map() };
+  let visited = 0;
+  const functions = new Set([
+    "FunctionDeclaration",
+    "FunctionExpression",
+    "ArrowFunctionExpression",
+    "ObjectMethod",
+    "ClassMethod",
+    "ClassPrivateMethod",
+  ]);
+  function identifiers(pattern, visit) {
+    for (const id of bindingIdentifiers(pattern)) visit(id);
+  }
+  function declare(scope, pattern) {
+    identifiers(pattern, (id) => {
+      if (!scope.bindings.has(id.name)) scope.bindings.set(id.name, new Set());
+      scope.bindings.get(id.name).add(id);
+    });
+  }
+  function children(node, visit) {
+    for (const [key, value] of Object.entries(node)) {
+      if (
+        [
+          "loc",
+          "start",
+          "end",
+          "extra",
+          "comments",
+          "tokens",
+          "leadingComments",
+          "trailingComments",
+          "innerComments",
+          "errors",
+        ].includes(key)
+      )
+        continue;
+      if (Array.isArray(value)) {
+        for (const child of value) if (child?.type) visit(child);
+      } else if (value?.type) visit(value);
+    }
+  }
+  function collect(node, scope) {
+    if (++visited > 350000) throw Error("語法樹節點超過分析上限");
+    if (functions.has(node.type)) {
+      if (node.type === "FunctionDeclaration" && node.id) declare(scope, node.id);
+      scope = { parent: scope, functionScope: true, bindings: new Map() };
+      if (node.type === "FunctionExpression" && node.id) declare(scope, node.id);
+      for (const param of node.params || []) declare(scope, param);
+    } else if (
+      [
+        "BlockStatement",
+        "CatchClause",
+        "ForStatement",
+        "ForInStatement",
+        "ForOfStatement",
+        "SwitchStatement",
+      ].includes(node.type)
+    ) {
+      scope = { parent: scope, functionScope: false, bindings: new Map() };
+      if (node.type === "CatchClause") declare(scope, node.param);
+    }
+    scopes.set(node, scope);
+    if (node.type === "VariableDeclaration") {
+      let owner = scope;
+      if (node.kind === "var")
+        while (owner.parent && !owner.functionScope) owner = owner.parent;
+      for (const declaration of node.declarations) declare(owner, declaration.id);
+    }
+    if (node.type === "ClassDeclaration" && node.id) declare(scope, node.id);
+    children(node, (child) => collect(child, scope));
+  }
+  function mark(pattern, scope) {
+    identifiers(pattern, (id) => {
+      let owner = scope;
+      while (owner && !owner.bindings.has(id.name)) owner = owner.parent;
+      if (owner)
+        for (const declaration of owner.bindings.get(id.name)) mutated.add(declaration);
+    });
+  }
+  function assignments(node) {
+    const scope = scopes.get(node);
+    if (node.type === "AssignmentExpression") mark(node.left, scope);
+    if (node.type === "UpdateExpression") mark(node.argument, scope);
+    if (
+      ["ForInStatement", "ForOfStatement"].includes(node.type) &&
+      node.left?.type !== "VariableDeclaration"
+    )
+      mark(node.left, scope);
+    // Repeated var declarations are also assignments to the same binding.
+    if (node.type === "VariableDeclaration")
+      for (const declaration of node.declarations) {
+        if (!declaration.init) continue;
+        identifiers(declaration.id, (id) => {
+          let owner = scope;
+          while (owner && !owner.bindings.has(id.name)) owner = owner.parent;
+          const declarations = owner?.bindings.get(id.name);
+          if (declarations?.size > 1)
+            for (const binding of declarations) mutated.add(binding);
+        });
+      }
+    children(node, assignments);
+  }
+  collect(ast.program || ast, root);
+  assignments(ast.program || ast);
+  return { mutated, scopes };
+}
 function inspect(ast, source) {
   const lists = {
       functions: [],
@@ -38,6 +163,8 @@ function inspect(ast, source) {
       imports: [],
     },
     counts = Object.fromEntries(Object.keys(lists).map((k) => [k, 0]));
+  const bindingInfo = mutatedBindings(ast);
+  const uncertainBindings = bindingInfo.mutated;
   let visited = 0;
   const add = (kind, record, node) => {
     counts[kind]++;
@@ -59,7 +186,10 @@ function inspect(ast, source) {
       ["style", "classList"].includes(node.property?.name)
     )
       return target(node.object, env);
-    if (node.type === "CallExpression" && name(node.callee).startsWith("document.")) {
+    if (
+      ["CallExpression", "OptionalCallExpression"].includes(node.type) &&
+      name(node.callee).startsWith("document.")
+    ) {
       const method = name(node.callee).split(".").pop(),
         value = literal(node.arguments[0]);
       if (!value) return null;
@@ -97,11 +227,40 @@ function inspect(ast, source) {
         node,
       );
       env = new Map(env);
+      if (node.id) env.delete(node.id.name);
       for (const param of node.params || [])
-        if (param.type === "Identifier") env.delete(param.name);
-    } else if (node.type === "BlockStatement") env = new Map(env);
+        for (const id of bindingIdentifiers(param)) env.delete(id.name);
+    } else if (
+      [
+        "BlockStatement",
+        "CatchClause",
+        "ForStatement",
+        "ForInStatement",
+        "ForOfStatement",
+        "SwitchStatement",
+      ].includes(node.type)
+    ) {
+      env = new Map(env);
+      if (node.type === "CatchClause")
+        for (const id of bindingIdentifiers(node.param)) env.delete(id.name);
+    }
+    if (
+      functionNode ||
+      [
+        "BlockStatement",
+        "CatchClause",
+        "ForStatement",
+        "ForInStatement",
+        "ForOfStatement",
+        "SwitchStatement",
+      ].includes(node.type)
+    ) {
+      // Shadow lexical/hoisted declarations before visiting statements, including TDZ cases.
+      for (const key of bindingInfo.scopes.get(node)?.bindings.keys() || [])
+        env.delete(key);
+    }
     if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") {
-      const resolved = target(node.init, env);
+      const resolved = uncertainBindings.has(node.id) ? null : target(node.init, env);
       if (resolved) env.set(node.id.name, resolved);
       else env.delete(node.id.name);
     }

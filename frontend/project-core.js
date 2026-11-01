@@ -1,6 +1,10 @@
 /* Static project analysis. Input is source data; it is never executed. */
 (function (scope) {
   "use strict";
+  const SourceUtils =
+    typeof module !== "undefined" && module.exports
+      ? require("./source-utils.js")
+      : scope.SourceUtils;
   const LIMITS = { files: 1500, perFile: 768 * 1024, total: 16 * 1024 * 1024 };
   const ignored = new Set([
     "node_modules",
@@ -53,13 +57,13 @@
     const roots = new Set(
       paths.filter((p) => p.includes("/")).map((p) => p.split("/")[0]),
     );
-    const root =
-      roots.size === 1 && paths.every((p) => p.includes("/")) ? [...roots][0] : "專案";
+    const hasRoot = roots.size === 1 && paths.every((p) => p.includes("/"));
+    const root = hasRoot ? [...roots][0] : "專案";
     for (let i = 0; i < files.length; i++) {
       if (cancelled()) throw Error("已取消分析");
       const file = files[i],
         raw = paths[i];
-      const path = normalize(root !== "專案" ? raw.slice(root.length + 1) : raw);
+      const path = normalize(hasRoot ? raw.slice(root.length + 1) : raw);
       if (!path) {
         skipped.push({ path: raw, reason: "無效路徑" });
         continue;
@@ -112,9 +116,12 @@
         references: [],
         signals: [],
         diagnostics: [],
+        counts: { functions: 0, references: 0 },
+        truncated: [],
         lines: source === null ? null : source.split("\n").length,
       };
       const add = (reference, line, kind) => {
+        if (reference) file.counts.references++;
         if (reference && file.references.length < 300)
           file.references.push({ reference, line, kind });
       };
@@ -143,12 +150,13 @@
                   "ArrowFunctionExpression",
                   "ObjectMethod",
                   "ClassMethod",
-                ].includes(node.type) &&
-                file.functions.length < 150
+                ].includes(node.type)
               ) {
+                file.counts.functions++;
                 const name =
                   node.id?.name || node.key?.name || parent?.id?.name || "匿名回呼";
-                file.functions.push({ name, line, async: !!node.async });
+                if (file.functions.length < 150)
+                  file.functions.push({ name, line, async: !!node.async });
               }
               const literal = (n) => (typeof n?.value === "string" ? n.value : null);
               if (
@@ -246,18 +254,39 @@
           }
         } else if (/^html?$/.test(ext)) {
           file.role = "網頁入口與 HTML 畫面結構";
-          const title = source.match(/<title\b[^>]*>([^<]*)<\/title>/i);
-          if (title) evidence(1, "頁面標題：" + title[1]);
-          scan(
-            /<(script|link|img|a|iframe|source)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["'][^>]*>/gi,
-            (m, line) => add(m[2], line, m[1] === "a" ? "頁面連結" : "資源"),
+          const tags = SourceUtils.htmlTags(source).filter(
+            (tag) => tag.templateDepth === 0,
           );
+          const title = tags.find((tag) => tag.name === "title");
+          if (title)
+            evidence(
+              title.line,
+              "頁面標題：" +
+                SourceUtils.decodeEntities(
+                  source.slice(title.contentStart, title.contentEnd),
+                ),
+            );
+          const baseTag = tags.find(
+            (tag) =>
+              tag.name === "base" &&
+              Object.prototype.hasOwnProperty.call(tag.attrs, "href"),
+          );
+          if (baseTag) file.base = baseTag.attrs.href;
+          for (const tag of tags) {
+            const attr =
+              tag.name === "a" || tag.name === "link"
+                ? "href"
+                : ["script", "img", "iframe", "source"].includes(tag.name)
+                  ? "src"
+                  : null;
+            if (attr && tag.attrs[attr])
+              add(tag.attrs[attr], tag.line, tag.name === "a" ? "頁面連結" : "資源");
+          }
           evidence(1, "依 HTML 標籤辨識；不執行內嵌腳本");
         } else if (/^(css|scss|sass|less)$/.test(ext)) {
           file.role = "視覺樣式、版面配置與響應式規則";
-          scan(/@import\s+(?:url\(\s*)?["']([^"']+)["']/gi, (m, line) =>
-            add(m[1], line, "樣式匯入"),
-          );
+          for (const item of SourceUtils.cssImports(source))
+            add(item.reference, item.line, "樣式匯入");
           scan(/url\(\s*["']?([^\s)'";]+)["']?\s*\)/gi, (m, line) =>
             add(m[1], line, "樣式資源"),
           );
@@ -296,6 +325,7 @@
         } else if (ext === "py") {
           file.role = "Python 程式模組（文字線索分析）";
           scan(/^\s*(?:async\s+)?def\s+(\w+)\s*\(/gm, (m, line) => {
+            file.counts.functions++;
             if (file.functions.length < 150) file.functions.push({ name: m[1], line });
           });
           scan(/^\s*@\w+\.(get|post|put|delete|route)\(["']([^"']+)/gm, (m, line) => {
@@ -318,6 +348,22 @@
           file.role = "開發工具／建置設定";
       } else if (!entry.readError)
         file.role = "圖片、字型或其他資源（僅記錄檔名，未讀取內容）";
+      for (const [kind, limit] of [
+        ["functions", 150],
+        ["references", 300],
+      ]) {
+        if (file.counts[kind] > file[kind].length) {
+          file.truncated.push(kind);
+          file.diagnostics.push(
+            (kind === "functions" ? "函式" : "引用") +
+              "共 " +
+              file.counts[kind] +
+              " 筆，目前只列前 " +
+              limit +
+              " 筆，分析關係可能不完整。",
+          );
+        }
+      }
       file.evidence = file.evidence.slice(0, 20);
       file.signals = [...new Set(file.signals)];
       files.push(file);
@@ -349,32 +395,32 @@
         const raw = ref.reference;
         let status = "missing",
           target = null;
-        if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(raw)) status = "external";
+        const isModule = ref.kind.includes("模組");
+        if (raw.startsWith("#")) status = isModule ? "unresolved" : "external";
+        else if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(raw)) status = "external";
         else if (raw.includes("${") || (/^[~@]/.test(raw) && !raw.startsWith("@")))
           status = "unresolved";
-        else if (
-          ref.kind.includes("模組") &&
-          !raw.startsWith(".") &&
-          !raw.startsWith("/")
-        )
+        else if (isModule && !raw.startsWith(".") && !raw.startsWith("/"))
           status = /^(?:@\/|~\/|#)/.test(raw) ? "unresolved" : "package";
         else {
-          let clean = raw.split(/[?#]/)[0];
+          let stem = null;
           try {
-            clean = decodeURIComponent(clean);
+            const origin = "https://project.invalid";
+            const parent = new URL(
+              file.path.split("/").map(encodeURIComponent).join("/"),
+              origin + "/",
+            );
+            const url = new URL(raw, file.base ? new URL(file.base, parent) : parent);
+            if (url.origin !== origin) status = "external";
+            else stem = normalize(decodeURIComponent(url.pathname).replace(/^\//, ""));
           } catch (_) {}
-          const stem = normalize(
-            clean.startsWith("/")
-              ? clean.slice(1)
-              : file.path.split("/").slice(0, -1).concat(clean).join("/"),
-          );
           if (stem !== null) {
-            target =
-              extensionCandidates.map((ext) => stem + ext).find((p) => known.has(p)) ||
-              null;
+            const candidates = (isModule ? extensionCandidates : [""]).map(
+              (ext) => stem + ext,
+            );
+            target = candidates.find((p) => known.has(p)) || null;
             if (target) status = "resolved";
-            else if (extensionCandidates.some((ext) => all.has(stem + ext)))
-              status = "skipped";
+            else if (candidates.some((p) => all.has(p))) status = "skipped";
           }
           if (!target && status === "missing" && raw.startsWith("/"))
             status = "unresolved";

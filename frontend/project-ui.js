@@ -34,6 +34,8 @@
     state.cancelTask?.();
     state.cancelTask = null;
     $("#project-cancel").hidden = true;
+    // Clear even on cancellation so choosing the same folder fires change again.
+    $("#project-folder").value = "";
   }
   async function openPage(path) {
     if (!state.report || !path) return;
@@ -382,7 +384,9 @@
     try {
       const input = await ProjectCore.collect(
         files,
-        (n, total) => status(`正在讀取檔案 ${n} / ${total}…`),
+        (n, total) => {
+          if (serial === state.serial) status(`正在讀取檔案 ${n} / ${total}…`);
+        },
         () => serial !== state.serial,
       );
       if (serial !== state.serial) return;
@@ -390,7 +394,9 @@
         throw Error("沒有可分析的檔案；請選擇包含原始碼的專案資料夾。");
       state.sources = new Map(input.entries.map((e) => [e.path, e.source]));
       status("正在分析結構、職責與檔案引用…");
-      const worker = new Worker(new URL("project-worker.js", scriptURL));
+      const workerURL = new URL("project-worker.js", scriptURL);
+      workerURL.search = new URL(scriptURL).search;
+      const worker = new Worker(workerURL);
       state.worker = worker;
       const report = await new Promise((resolve, reject) => {
         const timer = setTimeout(() => {

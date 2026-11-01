@@ -80,6 +80,39 @@ const babel = require("../frontend/vendor/babel.js");
   const unreadable = new Map(companySources);
   unreadable.set("PortalMain.htm", null);
   assert.ok(!Page.pages(companyReport, unreadable).includes("PortalMain.htm"));
+  const markupSources = new Map([
+    [
+      "fake.htm",
+      `<div data-html="<main><nav><form><input><link>">fragment</div><script>const fake='<!doctype html><html><body><main><nav><button>';</script>`,
+    ],
+    ["real.htm", "<!doctype html><title>Real</title><main>real content</main>"],
+  ]);
+  const markupReport = {
+    files: [...markupSources.keys()].map((path) => ({ path, kind: "htm" })),
+    links: [],
+  };
+  const fakeProfile = Page.profiles(markupReport, markupSources).find(
+    (page) => page.path === "fake.htm",
+  );
+  assert.ok(
+    !fakeProfile.reasons.some((reason) => /完整|主要內容|導覽|表單/.test(reason)),
+    "script strings and attribute values are not page structure",
+  );
+  assert.equal(Page.pages(markupReport, markupSources)[0], "real.htm");
+  const templateSources = new Map([
+    [
+      "template-only.htm",
+      "<template><html><body><main><nav><form><input></template><p>fragment</p>",
+    ],
+  ]);
+  const templateProfile = Page.profiles(
+    { files: [{ path: "template-only.htm", kind: "htm" }], links: [] },
+    templateSources,
+  )[0];
+  assert.ok(
+    !templateProfile.reasons.some((reason) => /完整|主要內容|導覽|表單/.test(reason)),
+    "template content is not an active document entry",
+  );
   const page = Page.create({ entry: "index.html", sources, report });
   assert.equal(page.asset("./src/main.ts?v=1").path, "src/main.ts");
   assert.equal(page.resolve("pages/about.html", "../styles/a.css"), "styles/a.css");
@@ -104,6 +137,45 @@ const babel = require("../frontend/vendor/babel.js");
   assert.equal(limited.asset("big.css").source, undefined);
   const entriesOnly = { files: [{ kind: "js", path: "src/main.js" }] };
   assert.deepEqual(Page.pages(entriesOnly), []);
+  const specialSources = new Map([
+    ["公司#1/main.html", "<main>hello</main>"],
+    ["公司#1/app.js", "function hi(){}"],
+  ]);
+  const specialPage = Page.create({
+    entry: "公司#1/main.html",
+    sources: specialSources,
+    report: { links: [] },
+  });
+  assert.equal(specialPage.asset("app.js").path, "公司#1/app.js");
+  const textCSS = `body::before { content: '@import "x.css";'; }`;
+  const cssSource = new Map([
+    ["main.html", "<main>test</main>"],
+    ["x.css", "p{color:red}"],
+  ]);
+  const cssPage = Page.create({
+    entry: "main.html",
+    sources: cssSource,
+    report: { links: [] },
+  });
+  assert.equal(
+    cssPage.expandCSS(textCSS, "main.css"),
+    textCSS,
+    "CSS import examples inside strings must remain literal",
+  );
+  const deepSource = new Map([["main.html", "<main>test</main>"]]);
+  for (let i = 0; i < 18; i++)
+    deepSource.set(`s${i}.css`, `@import "s${i + 1}.css";@import "s${i + 1}.css";`);
+  deepSource.set("s18.css", "p{color:red}");
+  const deep = Page.create({
+    entry: "main.html",
+    sources: deepSource,
+    report: { links: [] },
+  });
+  deep.expandCSS(deepSource.get("s0.css"), "s0.css");
+  assert.ok(
+    deep.warnings.some((w) => /工作量|匯入數|展開.*上限/.test(w)),
+    "repeated imports must have a global work budget",
+  );
   console.log(
     "PASS content-based discovery (custom .htm entry, no index, redirect/test penalties, incoming links), nested/root/base paths, duplicate basenames, local module graph, CSS imports/media/cycles, external isolation, missing files, size limits and no-HTML projects",
   );

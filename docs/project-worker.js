@@ -1,4 +1,4 @@
-importScripts("project-core.js", "vendor/babel.js");
+importScripts("source-utils.js?v=20261102-bugfix1", "project-core.js?v=20261102-bugfix1", "vendor/babel.js");
 self.onmessage = async (event) => {
   try {
     const report = await ProjectCore.analyze(event.data, async (source, ext) => {

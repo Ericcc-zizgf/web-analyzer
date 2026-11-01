@@ -66,4 +66,71 @@ class ApiTests(unittest.TestCase):
    self.assertEqual(address_for('localhost',80)[3][0],'127.0.0.1')
  def test_unknown_cache_entry(self):self.assertEqual(self.client.get('/api/analysis/not-found/node/n1').status_code,404)
 
+class BackendRegressionTests(unittest.TestCase):
+ setUp=ApiTests.setUp
+ post=ApiTests.post
+ def test_non_ascii_token_is_forbidden_not_server_error(self):
+  response=self.client.post('/api/analyze',json={'html':'<p>x</p>'},headers={'X-Analyzer-Token':'é'})
+  self.assertEqual(response.status_code,403,response.text)
+ def test_bad_resource_url_isolated(self):
+  with patch('analyzer.fetch') as fake:
+   response=self.post({'html':'<script src="http://["></script><link rel="stylesheet" href="http://[bad"><p id="good">still here</p>','base_url':'http://example.com/','load_assets':True})
+   self.assertEqual(response.status_code,200,response.text)
+   data=response.json
+   self.assertEqual(len(data['files']),2)
+   self.assertTrue(all(not file['loaded'] for file in data['files']))
+   self.assertTrue(any(node['attrs'].get('id')=='good' for node in data['nodes']))
+   fake.assert_not_called()
+ def test_bad_base_url_isolated(self):
+  response=self.post({'html':'<base href="http://["><p>still here</p>','base_url':'http://example.com/'})
+  self.assertEqual(response.status_code,200,response.text)
+  self.assertEqual(response.json['base_url'],'http://example.com/')
+  self.assertTrue(any('無法使用' in warning for warning in response.json['warnings']))
+ def test_bad_page_url_is_client_error(self):
+  for url in ['http://[','http://[#fragment','http://example.com:0','http://example.com/a\nb']:
+   response=self.post({'mode':'url','url':url})
+   self.assertEqual(response.status_code,400,(url,response.text))
+ def test_duplicate_stylesheet_media_and_cascade_positions(self):
+  data,_=analyze('<link rel="stylesheet" href="common.css" media="(min-width:800px)"><style>p{color:blue}</style><link rel="stylesheet" href="common.css" media="(max-width:799px)">',companions={'common.css':'p{color:red}'})
+  self.assertEqual(len(data['files']),3)
+  self.assertEqual([r['conditions'][0]['condition'] for r in data['css_rules'] if r['conditions']],['(min-width:800px)','(max-width:799px)'])
+  self.assertEqual(data['preview'].count('p{color:red}'),2)
+  self.assertLess(data['preview'].find('p{color:red}'),data['preview'].find('p{color:blue}'))
+  self.assertLess(data['preview'].find('p{color:blue}'),data['preview'].rfind('p{color:red}'))
+ def test_shared_script_source_keeps_per_tag_type(self):
+  data,_=analyze('<script src="a.js" type="application/ld+json"></script><script src="a.js"></script><script src="a.js" type="module"></script>',companions={'a.js':'function hi(){}'})
+  self.assertEqual([f['kind'] for f in data['files']],['data','js','js'])
+  self.assertEqual([f['module'] for f in data['files']],[False,False,True])
+ def test_repeated_resource_download_cached_but_semantics_kept(self):
+  with patch('analyzer.fetch',return_value={'url':'https://example.com/a.css','text':'p{color:red}','content_type':'text/css','bytes':12}) as fake:
+   data,_=analyze('<link rel="stylesheet" href="a.css"><link rel="stylesheet" href="a.css" media="print">',base_url='https://example.com/',load_assets=True)
+   self.assertEqual(fake.call_count,1)
+   self.assertEqual(len(data['files']),2)
+ def test_repeated_source_blocks_cannot_bypass_limit(self):
+  for block in ['<link rel="stylesheet" href="a.css">','<script src="a.js"></script>']:
+   with self.assertRaises(AnalysisError) as error:
+    analyze(block*61,companions={'a.css':'p{}','a.js':'x()'})
+   self.assertEqual(error.exception.status,413)
+ def test_expanded_source_budget_counts_repetitions(self):
+  css='/*'+'x'*(768*1024-4)+'*/'
+  with self.assertRaises(AnalysisError) as error:
+   analyze('<link rel="stylesheet" href="a.css">'*11,companions={'a.css':css})
+  self.assertEqual(error.exception.status,413)
+  self.assertIn('8 MB',error.exception.message)
+ def test_escaped_preview_budget_is_also_bounded(self):
+  css='/*'+'<'*400000+'*/'
+  with self.assertRaises(AnalysisError) as error:
+   analyze('<link rel="stylesheet" href="a.css">'*6,companions={'a.css':css})
+  self.assertEqual(error.exception.status,413)
+  self.assertIn('安全預覽',error.exception.message)
+ def test_css_rawtext_escape_preserves_source_and_preview_dom(self):
+  from bs4 import BeautifulSoup
+  css='p::before{content:"</style><p id=injected>injected</p><style>"}'
+  data,_=analyze('<link rel="stylesheet" href="a.css"><p id="original">original</p>',companions={'a.css':css})
+  self.assertEqual(data['files'][0]['source'],css)
+  preview=BeautifulSoup(data['preview'],'html5lib')
+  self.assertIsNone(preview.select_one('#injected'))
+  self.assertIsNotNone(preview.select_one('#original'))
+  self.assertIn(r'\3c /style>',preview.style.string)
+
 if __name__=='__main__':unittest.main()

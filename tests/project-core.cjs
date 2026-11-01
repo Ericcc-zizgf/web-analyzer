@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const core = require("../frontend/project-core.js");
+const SourceUtils = require("../frontend/source-utils.js");
 const babel = require("../frontend/vendor/babel.js");
 const parse = (source, ext) =>
   babel.parsers[/^tsx?$/.test(ext) ? "babel-ts" : "babel"].parse(source, {});
@@ -110,6 +111,123 @@ const entry = (path, source) => ({
         () => true,
       ),
     /取消/,
+  );
+  const tokens = SourceUtils.htmlTags(`<title>literal <a href="bad"> title</title>
+<script>const x='<a href="bad">'</script>
+<style>p{content:'<a href="bad">'}</style>
+<textarea><script src="bad"></textarea>
+<A data-href="bad" HREF='real&#46;htm?x=1&amp;y=2' title="a > b">`);
+  assert.deepEqual(
+    tokens.map((t) => t.name),
+    ["title", "script", "style", "textarea", "a"],
+  );
+  assert.equal(tokens.at(-1).attrs.href, "real.htm?x=1&y=2");
+  assert.equal(tokens.at(-1).attrs.title, "a > b");
+  assert.equal(tokens.at(-1).line, 5);
+  assert.deepEqual(
+    SourceUtils.cssImports(
+      `p{content:'@import "bad.css";'} /* @import "comment.css"; */ @import url('real.css') screen;`,
+    ).map((i) => [i.reference, i.conditions]),
+    [["real.css", "screen"]],
+  );
+  const templateTags = SourceUtils.htmlTags(
+    '<template><body id="fake"><template><base href="wrong/"></template></body></template><body id="real">',
+  );
+  assert.deepEqual(
+    templateTags
+      .filter((t) => t.name === "body")
+      .map((t) => [t.attrs.id, t.templateDepth]),
+    [
+      ["fake", 1],
+      ["real", 0],
+    ],
+  );
+  const templateReport = await core.analyze(
+    {
+      root: "t",
+      bytes: 0,
+      skipped: [],
+      entries: [
+        entry(
+          "main.html",
+          '<template><base href="wrong/"><a href="fake.htm">fake</a></template><base href="pages/"><a href="detail.htm">real</a>',
+        ),
+        entry("pages/detail.htm", "real"),
+      ],
+    },
+    parse,
+  );
+  assert.equal(templateReport.links[0].target, "pages/detail.htm");
+  assert.equal(templateReport.links.length, 1);
+  const namedRoot = await core.collect([
+    fake("專案/main.html", '<script src="/app.js"></script>'),
+    fake("專案/app.js", "function hi(){}"),
+  ]);
+  assert.deepEqual(
+    namedRoot.entries.map((e) => e.path),
+    ["main.html", "app.js"],
+    "folder named 專案 must still strip its root",
+  );
+  const edgeInput = {
+    root: "edge",
+    bytes: 0,
+    skipped: [],
+    entries: [
+      entry(
+        "main.html",
+        `<BASE HREF="pages/"><!-- <a href="fake.htm">ignored</a> --><script>const fake='<a href="fake.htm">';</script><SCRIPT data-src="wrong.js" SRC=../app.js></SCRIPT><A HREF="detail.htm?x=1&amp;y=2">Detail</A><img src=../logo>`,
+      ),
+      entry("pages/detail.htm", "<main>detail</main>"),
+      entry("app.js", ""),
+      entry("logo.js", ""),
+      entry(
+        "many.js",
+        Array.from({ length: 151 }, (_, i) => `function f${i}(){}`).join("\n"),
+      ),
+      entry(
+        "many-imports.js",
+        Array.from({ length: 301 }, (_, i) => `import './m${i}.js';`).join("\n"),
+      ),
+      entry(
+        "demo.css",
+        `p:before{content:'@import "fake.css";'} /* @import "comment.css"; */ @import "real.css";`,
+      ),
+      entry("real.css", "p{color:red}"),
+    ],
+  };
+  const edge = await core.analyze(edgeInput, parse);
+  const edgeLinks = edge.links.filter((l) => l.from === "main.html");
+  assert.equal(edgeLinks.find((l) => l.reference === "../app.js").target, "app.js");
+  assert.equal(
+    edgeLinks.find((l) => l.reference === "detail.htm?x=1&y=2").target,
+    "pages/detail.htm",
+  );
+  assert.equal(
+    edgeLinks.find((l) => l.reference === "detail.htm?x=1&y=2").kind,
+    "頁面連結",
+  );
+  assert.ok(!edgeLinks.some((l) => /wrong|fake/.test(l.reference)));
+  assert.equal(edgeLinks.find((l) => l.reference === "../logo").status, "missing");
+  assert.equal(edge.files.find((f) => f.path === "many.js").counts.functions, 151);
+  assert.ok(
+    edge.files
+      .find((f) => f.path === "many.js")
+      .diagnostics.some((d) => d.includes("150")),
+  );
+  assert.equal(
+    edge.files.find((f) => f.path === "many-imports.js").counts.references,
+    301,
+  );
+  assert.ok(
+    edge.files
+      .find((f) => f.path === "many-imports.js")
+      .diagnostics.some((d) => d.includes("300")),
+  );
+  assert.deepEqual(
+    edge.links
+      .filter((l) => l.from === "demo.css" && l.kind === "樣式匯入")
+      .map((l) => l.reference),
+    ["real.css"],
   );
   console.log(
     "PASS AST JS/TS/JSX, functions, module references, CSS assets, same names, missing/skipped files, package detection, Python routes, syntax errors, exclusion before read, limits and cancellation",

@@ -142,3 +142,5 @@ git push origin main
 
 首次發布排除 .venv、__pycache__、.DS_Store、test-results、啟動紀錄，未包含其他練習的 PDF、資料庫、草稿或密鑰。
 本次檢查與驗證見 [RELEASE-VERIFICATION.md](RELEASE-VERIFICATION.md)。
+
+本次 BUG 修復與回歸驗證見 [BUGFIX-VERIFICATION.md](BUGFIX-VERIFICATION.md)。

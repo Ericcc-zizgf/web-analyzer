@@ -8,6 +8,7 @@ from fetcher import AnalysisError,fetch,origin,parse_url
 
 MAX_HTML=2*1024*1024
 MAX_ASSETS=12
+MAX_ANALYSIS_TOTAL=8*1024*1024
 
 
 def css_rules(text,file_id,conditions=None):
@@ -54,15 +55,20 @@ def analyze(html,source_label='貼上的 HTML',base_url=None,companions=None,loa
     document_origin=origin(base_url) if base_url else None
     if soup.base and soup.base.get('href'):
         warnings.append('原頁有 <base>，資源讀取會使用該基準網址；安全預覽不保留 base。')
-        candidate=urljoin(base_url or '',soup.base['href'])
-        try:base_url=parse_url(candidate)[0]
-        except AnalysisError:warnings.append('無法使用原頁的 base 網址')
+        try:
+            candidate=urljoin(base_url or '',soup.base['href'])
+            base_url=parse_url(candidate)[0]
+        except (AnalysisError,ValueError):warnings.append('無法使用原頁的 base 網址')
     source_origin=document_origin or (origin(base_url) if base_url else None)
-    seen={};assets_used=0;budget=4*1024*1024
+    external_cache={};assets_used=0;budget=4*1024*1024
+    expanded_bytes=len(html.encode())
     def external(reference,kind):
         nonlocal assets_used,budget
-        label=reference[:300];key=unquote(urlsplit(reference).path).lstrip('./')
-        content=None;url=urljoin(base_url,reference) if base_url else reference
+        try:
+            key=unquote(urlsplit(reference).path).lstrip('./')
+            url=urljoin(base_url,reference) if base_url else reference
+        except ValueError:return None,reference,'資源網址格式不正確'
+        content=None
         if key in companions:content=companions[key]
         elif key.split('/')[-1] in companions:content=companions[key.split('/')[-1]]
         elif load_assets and base_url:
@@ -82,18 +88,22 @@ def analyze(html,source_label='貼上的 HTML',base_url=None,companions=None,loa
     for tag in tags:
         kind='css' if tag.name=='style' or tag.name=='link' and 'stylesheet' in tag.get('rel',[]) else 'js' if tag.name=='script' else None
         if not kind:continue
+        # Count source blocks, not unique paths: repeated stylesheets still have
+        # independent cascade positions/media, and expand separately in preview.
+        if file_id>=60:raise AnalysisError('樣式／腳本區塊超過 60 份，請提供較小片段',413)
         file_id+=1;fid='f'+str(file_id);reference=tag.get('href') if tag.name=='link' else tag.get('src')
         if reference:
-            dedup=(kind,reference)
-            if dedup in seen:
-                replacements[ids[id(tag)]]=seen[dedup];continue
-            content,url,error=external(reference,kind);label=reference
+            key=(kind,reference)
+            if key not in external_cache:external_cache[key]=external(reference,kind)
+            content,url,error=external_cache[key];label=reference
         else:content=tag.string if tag.string is not None else tag.get_text();url=None;error=None;label=('內嵌 CSS' if kind=='css' else '內嵌 JavaScript')+' #'+str(file_id)
+        expanded_bytes+=len((content or '').encode())
+        if expanded_bytes>MAX_ANALYSIS_TOTAL:raise AnalysisError('HTML 與展開的樣式／腳本合計限制 8 MB',413)
         script_type=tag.get('type','').lower()
         data_script=kind=='js' and script_type not in ('','module','text/javascript','application/javascript','text/ecmascript','application/ecmascript')
         if data_script and not reference:label='內嵌資料（'+script_type+'） #'+str(file_id)
         file={'id':fid,'kind':'data' if data_script else kind,'label':label,'url':url,'source':content or '', 'loaded':content is not None,'error':error,'node':ids[id(tag)],'line':getattr(tag,'sourceline',None),'inline':not bool(reference),'module':script_type=='module','type':script_type}
-        files.append(file);seen[(kind,reference)]=fid if reference else None;replacements[ids[id(tag)]]=fid
+        files.append(file);replacements[ids[id(tag)]]=fid
         if error:warnings.append(label+'：'+error)
         if kind=='css' and content is not None:
             groups=[{'type':'media','condition':tag['media']}] if tag.get('media') and tag['media']!='all' else []
@@ -114,7 +124,7 @@ def analyze(html,source_label='貼上的 HTML',base_url=None,companions=None,loa
         if tag.name=='link':
             fid=replacements.get(node_id);file=by_file.get(fid)
             if file and file['kind']=='css' and file['loaded']:
-                style=safe.new_tag('style');style.string=file['source'];style['data-web-analyzer-node']=node_id
+                style=safe.new_tag('style');style.string=file['source'].replace('<',r'\3c ');style['data-web-analyzer-node']=node_id
                 if tag.get('media'):style['media']=tag['media']
                 tag.replace_with(style)
             else:tag.decompose()
@@ -125,4 +135,6 @@ def analyze(html,source_label='貼上的 HTML',base_url=None,companions=None,loa
         if tag.name=='img':tag['alt']=tag.get('alt','圖片（安全預覽不載入外部資源）')
     meta=safe.new_tag('meta');meta['http-equiv']='Content-Security-Policy';meta['content']="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; form-action 'none'; base-uri 'none'";safe.head.insert(0,meta)
     safe.html['lang']=safe.html.get('lang','zh-Hant')
-    return {'source_label':source_label,'base_url':base_url,'html':html,'nodes':nodes,'files':files,'css_rules':rules,'inline_events':events,'warnings':list(dict.fromkeys(warnings))[:80],'preview':str(safe),'stats':{'elements':len(nodes),'css_rules':len(rules),'scripts':sum(f['kind']=='js' for f in files),'stylesheets':sum(f['kind']=='css' for f in files),'inline_styles':sum(bool(n['attrs'].get('style')) for n in nodes)}},tag_map
+    preview=str(safe)
+    if len(preview.encode())>MAX_ANALYSIS_TOTAL:raise AnalysisError('安全預覽展開內容限制 8 MB',413)
+    return {'source_label':source_label,'base_url':base_url,'html':html,'nodes':nodes,'files':files,'css_rules':rules,'inline_events':events,'warnings':list(dict.fromkeys(warnings))[:80],'preview':preview,'stats':{'elements':len(nodes),'css_rules':len(rules),'scripts':sum(f['kind']=='js' for f in files),'stylesheets':sum(f['kind']=='css' for f in files),'inline_styles':sum(bool(n['attrs'].get('style')) for n in nodes)}},tag_map

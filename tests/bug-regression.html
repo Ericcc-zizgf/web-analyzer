@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8"><title>解析器問題回歸測試</title>
+<h1>解析器問題回歸測試</h1><button id="run">執行測試</button><pre id="result">尚未執行</pre>
+<script src="../docs/source-utils.js?v=20261102-bugfix1"></script>
+<script src="../docs/project-core.js?v=20261102-bugfix1"></script>
+<script src="../docs/project-page.js?v=20261102-bugfix1"></script>
+<script src="../docs/static-analyzer.js?v=20261102-bugfix1"></script>
+<script>
+const assert=(value,message)=>{if(!value)throw Error(message)};
+const form=(html)=>{const f=new FormData();f.set('html',html);return f};
+const run=html=>StaticAnalyzer.route('/api/analyze',{body:form(html)});
+document.querySelector('#run').onclick=async()=>{
+ const lines=[];let count=0;
+ async function test(name,fn){try{await fn();count++;lines.push('PASS '+name)}catch(e){lines.push('FAIL '+name+': '+e.message)}document.querySelector('#result').textContent=lines.join('\n')}
+ await test('HTML/head/body 屬性保留，不被註解與腳本文字冒充',async()=>{
+  const html='<!-- <body class="fake-comment"> --><!doctype html><html lang="en"><head data-demo="yes"><template><body class="fake-template"></body></template><script>const text=\'<body class="fake-script">\';<'+'/script></head><body class="real" data-value="a>b"><p>Hello</p></body></html>';
+  const r=await run(html);assert(r.nodes.find(n=>n.tag==='html').attrs.lang==='en','html attrs lost');const b=r.nodes.find(n=>n.tag==='body');assert(b.attrs.class==='real','body wrong');assert(b.attrs['data-value']==='a>b','quoted > broke attrs');
+  const t=document.createElement('template');t.innerHTML=r.preview;assert(t.content.querySelector('body')?.className==='real'||r.preview.includes('class="real"'),'preview class lost');
+ });
+ await test('外部 CSS 的小於號保留顯示語意，不能插入新 HTML',async()=>{
+  const f=form('<link rel="stylesheet" href="a.css"><p>safe</p>');f.append('assets',new File(['p::before {content:"</style><p id=intruder>bad</p><style>"}'],'a.css'));
+  const r=await StaticAnalyzer.route('/api/analyze',{body:f});const t=document.createElement('template');t.innerHTML=r.preview;
+  assert(!t.content.querySelector('#intruder'),'CSS injected DOM');const style=t.content.querySelector('style').textContent;assert(style.includes('\\3c '),'CSS escape missing');assert(!style.includes('\\\\3c '),'double-escaped CSS');assert(r.files[0].source.includes('</style>'),'source modified');
+ });
+ await test('相同 CSS 不同 media 逐區塊保留',async()=>{
+  const f=form('<link rel="stylesheet" href="a.css" media="(min-width:800px)"><link rel="stylesheet" href="a.css" media="(max-width:799px)">');f.append('assets',new File(['p{color:red}'],'a.css'));
+  const r=await StaticAnalyzer.route('/api/analyze',{body:f});assert(r.css_rules.length===2,'media rules merged');assert(r.css_rules[1].conditions[0].condition.includes('799'),'second media lost');
+ });
+ await test('重複資源不能繞過區塊與展開容量上限',async()=>{
+  const sources=new Map([['main.html','<link rel="stylesheet" href="a.css">'.repeat(61)],['a.css','p{color:red}']]);const project={entry:'main.html',sources,report:{links:[]}};
+  let failed=false;try{await StaticAnalyzer.route('/api/analyze',{body:new FormData(),project})}catch(e){failed=/60/.test(e.message)}assert(failed,'61 blocks accepted');
+  sources.set('main.html','<link rel="stylesheet" href="a.css">'.repeat(20));sources.set('a.css','/*'+'x'.repeat(500000)+'*/p{color:red}');failed=false;
+  try{await StaticAnalyzer.route('/api/analyze',{body:new FormData(),project})}catch(e){failed=/8 MB/.test(e.message)}assert(failed,'expanded content budget bypassed');
+ });
+ await test('大型元素片段按需產生並標示截斷',async()=>{
+  const r=await run('<main>'+'x'.repeat(220000)+'</main>');const n=r.nodes.find(n=>n.tag==='main');const snippet=await StaticAnalyzer.route(`/api/analysis/${r.id}/node/${n.id}`);assert(snippet.source.length===200000,'snippet bound');assert(snippet.truncated,'missing truncated marker');
+ });
+ await test('template 與註解的元素片段不遺失原始內容',async()=>{
+  const r=await run('<main><!-- kept --><template id="tpl"><span data-x="y">inside</span></template></main>');const n=r.nodes.find(n=>n.tag==='main');const snippet=await StaticAnalyzer.route(`/api/analysis/${r.id}/node/${n.id}`);assert(snippet.source.includes('<!-- kept -->'),'comment missing');assert(snippet.source.includes('inside'),'template missing');assert(!snippet.source.includes('data-static-source-key'),'internal marker leaked');
+ });
+ document.querySelector('#result').textContent+='\n'+count+'/6 tests passed';
+};
+</script>

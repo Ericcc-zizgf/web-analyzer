@@ -1,6 +1,10 @@
 /* Resolve one selected HTML page and its dependencies from an in-memory folder snapshot. */
 (function (scope) {
   "use strict";
+  const SourceUtils =
+    typeof module !== "undefined" && module.exports
+      ? require("./source-utils.js")
+      : scope.SourceUtils;
   const bytes = (text) => new TextEncoder().encode(text).length;
   // Rank document content and navigation evidence, never a privileged filename.
   function profiles(report, sources) {
@@ -27,21 +31,34 @@
     return candidates
       .map((file) => {
         const source = sources?.get(file.path) || "";
+        const tags = SourceUtils.htmlTags(source).filter(
+          (tag) => tag.templateDepth === 0,
+        );
         const clean = source.replace(/<!--[\s\S]*?-->/g, "");
-        const title = (clean.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
-          .replace(/<[^>]+>/g, "")
-          .trim();
+        const titleTag = tags.find((tag) => tag.name === "title");
+        const title = titleTag
+          ? SourceUtils.decodeEntities(
+              source.slice(titleTag.contentStart, titleTag.contentEnd),
+            ).trim()
+          : "";
         const body = clean.replace(/<(script|style|head)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
         const text = body
           .replace(/<[^>]+>/g, " ")
           .replace(/\s+/g, " ")
           .trim();
-        const full = /<!doctype\s+html|<html\b|<body\b/i.test(clean);
-        const main = /<main\b|role\s*=\s*["']main["']/i.test(body);
-        const nav = /<nav\b|role\s*=\s*["']navigation["']/i.test(body);
-        const controls = (body.match(/<(?:form|button|input|select|textarea)\b/gi) || [])
-          .length;
-        const resources = (clean.match(/<(?:script|link)\b/gi) || []).length;
+        const full =
+          tags.some((tag) => ["html", "body"].includes(tag.name)) ||
+          /^\s*<!doctype\s+html\b/i.test(clean);
+        const main = tags.some((tag) => tag.name === "main" || tag.attrs.role === "main");
+        const nav = tags.some(
+          (tag) => tag.name === "nav" || tag.attrs.role === "navigation",
+        );
+        const controls = tags.filter((tag) =>
+          ["form", "button", "input", "select", "textarea"].includes(tag.name),
+        ).length;
+        const resources = tags.filter((tag) =>
+          ["script", "link"].includes(tag.name),
+        ).length;
         const incomingCount = incoming.get(file.path)?.size || 0;
         const outgoingCount = outgoing.get(file.path)?.size || 0;
         const reasons = [];
@@ -82,7 +99,12 @@
           score -= 25;
           reasons.push("位於測試／範例目錄");
         }
-        if (/<meta\b[^>]*http-equiv\s*=\s*["']?refresh/i.test(clean)) {
+        if (
+          tags.some(
+            (tag) =>
+              tag.name === "meta" && tag.attrs["http-equiv"]?.toLowerCase() === "refresh",
+          )
+        ) {
           score -= 25;
           reasons.push("轉址頁面");
         }
@@ -123,7 +145,10 @@
     function resolve(from, reference, base) {
       try {
         const origin = "https://project.invalid";
-        const parent = new URL(from, origin + "/");
+        const parent = new URL(
+          from.split("/").map(encodeURIComponent).join("/"),
+          origin + "/",
+        );
         const url = new URL(reference, base ? new URL(base, parent) : parent);
         if (url.origin !== origin || !["https:"].includes(url.protocol)) return null;
         const path = decodeURIComponent(url.pathname).replace(/^\//, "");
@@ -173,39 +198,44 @@
       if (!path) return { path: null, source: undefined };
       return { path, source: read(path) };
     }
+    let cssWork = 0;
     function expandCSS(source, from, stack = []) {
       if (stack.includes(from) || stack.length >= 20) {
         warn(from + "：循環或過深的 CSS @import，已停止展開。");
         return "";
       }
-      let size = bytes(source);
-      const result = source.replace(
-        /\/\*[\s\S]*?\*\/|@import\s+(?:url\(\s*["']?([^"'\s)]+)["']?\s*\)|["']([^"']+)["'])\s*([^;]*);/gi,
-        (match, url, quoted, conditions) => {
-          if (match.startsWith("/*")) return match;
-          const reference = url || quoted;
-          if (/\b(?:layer|supports)\b/i.test(conditions)) {
-            warn(from + "：含 layer／supports 的 CSS @import 暫未展開。");
-            return "";
-          }
-          const target = resolve(from, reference);
-          const imported = target ? read(target) : undefined;
-          if (imported === undefined) {
-            warn(from + " → " + reference + "：未能從資料夾載入 CSS @import。");
-            return "";
-          }
-          const expanded = expandCSS(imported, target, [...stack, from]);
-          size += bytes(expanded);
-          if (size > 2 * 1024 * 1024) {
-            warn(from + "：展開後 CSS 超過 2 MB，已略過部分匯入。");
-            return "";
-          }
-          return conditions.trim()
-            ? "@media " + conditions.trim() + " {\n" + expanded + "\n}"
-            : expanded;
-        },
-      );
-      return result;
+      let result = "",
+        cursor = 0,
+        size = bytes(source);
+      for (const item of SourceUtils.cssImports(source)) {
+        result += source.slice(cursor, item.start);
+        cursor = item.end;
+        if (++cssWork > 2000) {
+          warn("CSS 匯入展開工作量超過 2,000 筆，已停止其餘匯入。");
+          continue;
+        }
+        const conditions = item.conditions.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+        if (/\b(?:layer|supports)\b/i.test(conditions)) {
+          warn(from + "：含 layer／supports 的 CSS @import 暫未展開。");
+          continue;
+        }
+        const target = resolve(from, item.reference),
+          imported = target ? read(target) : undefined;
+        if (imported === undefined) {
+          warn(from + " → " + item.reference + "：未能從資料夾載入 CSS @import。");
+          continue;
+        }
+        const expanded = expandCSS(imported, target, [...stack, from]);
+        size += bytes(expanded);
+        if (size > 2 * 1024 * 1024) {
+          warn(from + "：展開後 CSS 超過 2 MB，已略過部分匯入。");
+          continue;
+        }
+        result += conditions
+          ? "@media " + conditions + " {\n" + expanded + "\n}"
+          : expanded;
+      }
+      return result + source.slice(cursor);
     }
     function scripts(roots) {
       const found = [],

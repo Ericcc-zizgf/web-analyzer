@@ -477,3 +477,77 @@ body.component-mode .canvas-nav .canvas-button.active {
 .component-flow-edges defs path {
   stroke: none;
 }
+
+/* Progressive function browsing uses the existing charcoal canvas and green controls. */
+.component-flow-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.component-flow-actions .canvas-button {
+  font-size: 11px;
+  min-height: 32px;
+  padding: 6px 8px;
+}
+.component-flow-evidence,
+.component-flow-connections {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid #46574c;
+  border-radius: 12px;
+  background: #19221c;
+  color: #d9e6dd;
+}
+.component-flow-evidence[hidden],
+.component-flow-connections[hidden] {
+  display: none;
+}
+.component-flow-evidence h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.component-flow-evidence p {
+  color: #b7c8bd;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.component-flow-evidence .canvas-button,
+.component-flow-connections .canvas-button {
+  display: block;
+  max-width: 100%;
+  margin-top: 8px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.component-flow-proof code {
+  display: block;
+  margin-top: 6px;
+  white-space: pre-wrap;
+  font:
+    11px/1.7 ui-monospace,
+    monospace;
+  color: inherit;
+}
+.component-flow-connections summary {
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.component-flow-edges path.component-flow-edge-hit {
+  stroke: transparent;
+  stroke-width: 18;
+  pointer-events: stroke;
+  cursor: pointer;
+  fill: none;
+}
+.component-flow-edges path.component-flow-edge-hit:hover,
+.component-flow-edges path.component-flow-edge-hit:focus-visible {
+  stroke: #a2d9b440;
+  outline: none;
+}
+.component-flow-edges defs path {
+  fill: #a2d9b4;
+}

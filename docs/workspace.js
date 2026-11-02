@@ -818,7 +818,10 @@
   flowTop.append(make("h2", "", "元件 JavaScript 流程"));
   const flowMinus = button("−", "", () => changeFlowScale(-0.1));
   const flowPlus = button("+", "", () => changeFlowScale(0.1));
-  const flowReset = button("重設排列", "", () => renderComponentFlow());
+  const flowReset = button("重設排列", "", () => {
+    functionPositions.clear();
+    renderComponentFlow();
+  });
   flowMinus.setAttribute("aria-label", "縮小元件流程圖");
   flowPlus.setAttribute("aria-label", "放大元件流程圖");
   const flowScaleLabel = make("output", "", "100%");
@@ -831,7 +834,11 @@
   const flowWorld = make("div", "component-flow-world");
   flowSpace.append(flowWorld);
   flowCanvas.append(flowSpace);
-  flowSection.append(flowTop, flowNote, flowCanvas);
+  const flowEvidence = make("section", "component-flow-evidence");
+  flowEvidence.hidden = true;
+  flowEvidence.setAttribute("aria-label", "連線原始碼依據");
+  const flowConnections = make("details", "component-flow-connections");
+  flowSection.append(flowTop, flowNote, flowCanvas, flowEvidence, flowConnections);
   detail.append(detailTop, detailHeading, flowSection, columns);
   document.body.append(detail);
   let detailRequest = 0,
@@ -841,7 +848,54 @@
     detailKind = "html",
     previousFocus = null;
   let flowScale = 1,
-    currentFunctionFlow = null;
+    currentFunctionFlow = null,
+    expandedFunctions = new Set(),
+    showAllFunctions = false,
+    functionLimit = 40,
+    functionPositions = new Map();
+  function openFlowEvidence(edge, graph) {
+    flowEvidence.replaceChildren();
+    flowEvidence.hidden = false;
+    const from = graph.nodes.find((n) => n.id === edge.from),
+      to = graph.nodes.find((n) => n.id === edge.to);
+    flowEvidence.append(
+      make("h3", "", from.title + " → " + to.title),
+      make(
+        "p",
+        "",
+        edge.label +
+          " · " +
+          (edge.certainty === "confirmed"
+            ? "已確認靜態關聯"
+            : "可能相關，尚未確認執行時目標"),
+      ),
+    );
+    for (const record of edge.evidence || []) {
+      const item = button(record.file + ":" + record.line + ":" + record.column, "", () =>
+        window.dispatchEvent(new CustomEvent("locator:open-block", { detail: record })),
+      );
+      item.classList.add("component-flow-proof");
+      const source = window.LocatorIndex.source(record.file) || "";
+      item.append(
+        make(
+          "code",
+          "",
+          source.slice(record.start, Math.min(record.end, record.start + 220)),
+        ),
+      );
+      flowEvidence.append(item);
+    }
+    if (!edge.evidence?.length)
+      flowEvidence.append(
+        make("p", "", "這條關聯尚無可定位的呼叫語句，請對照兩端函式原始碼。"),
+      );
+    flowEvidence.append(
+      button("關閉連線依據", "", () => {
+        flowEvidence.hidden = true;
+      }),
+    );
+    flowEvidence.scrollIntoView({ block: "nearest" });
+  }
   function changeFlowScale(delta) {
     flowScale = Math.max(0.25, Math.min(1.5, flowScale + delta));
     flowWorld.style.transform = `scale(${flowScale})`;
@@ -850,8 +904,39 @@
     flowSpace.style.height = Number(flowWorld.dataset.height || 400) * flowScale + "px";
   }
   function renderComponentFlow(input) {
-    if (input) currentFunctionFlow = input;
-    const graph = currentFunctionFlow || { nodes: [], edges: [], warnings: [] };
+    const previousScroll = { left: flowCanvas.scrollLeft, top: flowCanvas.scrollTop };
+    if (input) {
+      currentFunctionFlow = input;
+      expandedFunctions.clear();
+      showAllFunctions = false;
+      functionLimit = 40;
+      functionPositions.clear();
+      flowEvidence.hidden = true;
+    }
+    const complete = currentFunctionFlow || { nodes: [], edges: [], warnings: [] };
+    const projection = window.FunctionFlow.view(
+      complete,
+      expandedFunctions,
+      showAllFunctions,
+      functionLimit,
+    );
+    const graph = { ...complete, nodes: projection.nodes, edges: projection.edges };
+    flowConnections.replaceChildren(
+      make("summary", "", "連線清單 · " + graph.edges.length + " 條（可查看原始碼依據）"),
+    );
+    for (const edge of graph.edges) {
+      const a = complete.nodes.find((n) => n.id === edge.from),
+        b = complete.nodes.find((n) => n.id === edge.to);
+      flowConnections.append(
+        button(a.title + " → " + b.title + " · " + edge.label, "", () =>
+          openFlowEvidence(edge, complete),
+        ),
+      );
+    }
+    flowAll.textContent = showAllFunctions ? "逐層瀏覽" : "展開全部";
+    flowAll.setAttribute("aria-pressed", String(showAllFunctions));
+    flowMore.hidden = projection.remaining === 0;
+    flowMore.textContent = "再顯示 40 個區塊（尚有 " + projection.remaining + " 個）";
     const first =
       graph.nodes.find((n) => n.kind === "functions") ||
       graph.nodes.find((n) => n.kind === "bindings") ||
@@ -860,14 +945,22 @@
     else jsLearning.hidden = true;
     flowWorld.replaceChildren();
     flowNote.textContent =
-      "從取得元件的變數，接到事件與完整函式。實線表示已確認關聯，虛線表示可能相關；點函式定位原檔並框選整段程式碼。" +
+      "先看元件變數、事件與直接處理函式，按節點的「展開下游」繼續追查。點函式看整段原檔，點連線看依據。" +
+      " 目前顯示 " +
+      graph.nodes.length +
+      "／" +
+      complete.nodes.length +
+      " 個區塊。實線為已確認，虛線為可能相關。" +
       (graph.warnings.length ? " · " + graph.warnings.join("；") : "");
     if (!graph.nodes.length) {
       flowCanvas.hidden = true;
-      flowNote.textContent += " 尚未找到能確認關聯的 JavaScript；不代表沒有互動。";
+      flowConnections.hidden = true;
+      flowNote.textContent +=
+        " 尚未找到可連線的元件變數或函式。請查看下方搜尋範圍：來源缺失、解析失敗或動態寫法都可能讓關聯不完整。";
       return;
     }
     flowCanvas.hidden = false;
+    flowConnections.hidden = false;
     const edges = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     edges.classList.add("component-flow-edges");
     flowWorld.append(edges);
@@ -887,13 +980,20 @@
     for (const node of graph.nodes) {
       const card = make("article", "component-flow-node");
       card.dataset.kind = node.kind;
+      card.dataset.flowNode = node.id;
       const heading = make("button", "component-flow-handle", node.title);
       heading.type = "button";
       heading.title = "拖曳移動；方向鍵調整位置";
       const meta = make(
         "p",
         "",
-        node.file + (node.line ? " · 第 " + node.line + " 行" : ""),
+        node.file +
+          (node.line
+            ? " · 第 " +
+              node.line +
+              (node.endLine > node.line ? "–" + node.endLine : "") +
+              " 行"
+            : ""),
       );
       const snippet = make("button", "component-flow-snippet");
       snippet.type = "button";
@@ -928,6 +1028,61 @@
         codePanel.scrollIntoView({ block: "nearest", behavior: "smooth" });
       };
       card.append(heading, meta, snippet);
+      if (node.type === "function") {
+        const downstream = [
+          ...new Set(
+            (projection.outgoing.get(node.id) || [])
+              .filter((e) => e.to !== node.id)
+              .map((e) => e.to),
+          ),
+        ];
+        const upstream = (projection.incoming.get(node.id) || []).filter(
+          (e) => e.from !== node.id,
+        );
+        const actions = make("div", "component-flow-actions");
+        if (downstream.length) {
+          const expand = button(
+            (expandedFunctions.has(node.id) ? "收合下游" : "展開下游") +
+              " · " +
+              downstream.length +
+              " 個區塊",
+            "",
+            () => {
+              if (expandedFunctions.has(node.id)) expandedFunctions.delete(node.id);
+              else expandedFunctions.add(node.id);
+              showAllFunctions = false;
+              renderComponentFlow();
+              [...flowWorld.querySelectorAll(".component-flow-node")]
+                .find((c) => c.dataset.flowNode === node.id)
+                ?.querySelector(".component-flow-actions button")
+                ?.focus({ preventScroll: true });
+            },
+          );
+          expand.disabled = showAllFunctions;
+          expand.setAttribute(
+            "aria-expanded",
+            String(expandedFunctions.has(node.id) || showAllFunctions),
+          );
+          actions.append(expand);
+        }
+        if (upstream.length)
+          actions.append(
+            button("上游 · " + upstream.length + " 個區塊", "", () => {
+              flowEvidence.replaceChildren(make("h3", "", node.title + " 的上游關聯"));
+              flowEvidence.hidden = false;
+              for (const edge of upstream) {
+                const from = complete.nodes.find((n) => n.id === edge.from);
+                flowEvidence.append(
+                  button(from.title + " · " + edge.label, "", () =>
+                    openFlowEvidence(edge, complete),
+                  ),
+                );
+              }
+              flowEvidence.scrollIntoView({ block: "nearest" });
+            }),
+          );
+        if (actions.childNodes.length) card.append(actions);
+      }
       if (node.note) card.append(make("p", "flow-unresolved", node.note));
       flowWorld.append(card);
       const column = node.column ?? categories[node.kind] ?? 3;
@@ -935,6 +1090,24 @@
       card.style.top = bottoms[column] + "px";
       bottoms[column] += card.offsetHeight + 60;
       cards.push({ id: node.id, el: card });
+      const saved = functionPositions.get(node.id);
+      if (saved) {
+        card.style.left = saved.x + "px";
+        card.style.top = saved.y + "px";
+      }
+      const settled = window.CanvasLayout.settle(
+        cards.map((c) => ({
+          id: c.id,
+          x: c.el.offsetLeft,
+          y: c.el.offsetTop,
+          width: c.el.offsetWidth,
+          height: c.el.offsetHeight,
+        })),
+      );
+      for (let i = 0; i < cards.length; i++) {
+        cards[i].el.style.left = settled[i].x + "px";
+        cards[i].el.style.top = settled[i].y + "px";
+      }
       const geometry = () =>
         cards.map((c) => ({
           id: c.id,
@@ -947,6 +1120,7 @@
         if (window.CanvasLayout.canPlace(node.id, x, y, geometry())) {
           card.style.left = x + "px";
           card.style.top = y + "px";
+          functionPositions.set(node.id, { x, y });
           draw();
         } else card.classList.add("movement-blocked");
       };
@@ -1026,16 +1200,40 @@
         );
         path.setAttribute("marker-end", "url(#component-flow-arrow)");
         if (edge.certainty === "possible") path.setAttribute("stroke-dasharray", "5 5");
+        const hit = document.createElementNS(edges.namespaceURI, "path");
+        hit.setAttribute("d", path.getAttribute("d"));
+        hit.classList.add("component-flow-edge-hit");
+        hit.setAttribute("tabindex", "0");
+        hit.setAttribute("role", "button");
+        hit.setAttribute(
+          "aria-label",
+          "查看連線依據：" +
+            mapTitle(edge.from) +
+            " → " +
+            mapTitle(edge.to) +
+            " · " +
+            edge.label,
+        );
+        hit.onclick = () => openFlowEvidence(edge, complete);
+        hit.onkeydown = (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openFlowEvidence(edge, complete);
+          }
+        };
+        function mapTitle(id) {
+          return complete.nodes.find((n) => n.id === id)?.title || id;
+        }
         const title = document.createElementNS(edges.namespaceURI, "title");
         title.textContent = edge.label;
         path.append(title);
-        edges.append(path);
+        edges.append(path, hit);
       }
       changeFlowScale(0);
     }
     draw();
-    flowCanvas.scrollTop = 0;
-    flowCanvas.scrollLeft = 0;
+    flowCanvas.scrollTop = input ? 0 : previousScroll.top;
+    flowCanvas.scrollLeft = input ? 0 : previousScroll.left;
   }
   window.addEventListener("locator:function-flow", (event) =>
     renderComponentFlow(event.detail),
@@ -1050,7 +1248,17 @@
     );
     changeFlowScale(0);
   });
-  flowTop.append(fitFunctions);
+  const flowAll = button("展開全部", "", () => {
+    showAllFunctions = !showAllFunctions;
+    expandedFunctions.clear();
+    renderComponentFlow();
+  });
+  const flowMore = button("再顯示 40 個區塊", "", () => {
+    functionLimit += 40;
+    renderComponentFlow();
+  });
+  flowMore.hidden = true;
+  flowTop.append(fitFunctions, flowAll, flowMore);
   async function openComponent(id) {
     const selected = id
       ? window.PageWorkbench.selectComponent(id)
@@ -1102,7 +1310,59 @@
     componentCode.textContent = "正在讀取目前元件…";
     formatButton.disabled = true;
     copyButton.disabled = true;
-    currentFunctionFlow = null;
+    ((currentFunctionFlow = null),
+      (expandedFunctions = new Set()),
+      (showAllFunctions = false),
+      (functionLimit = 40),
+      (functionPositions = new Map()));
+    function openFlowEvidence(edge, graph) {
+      flowEvidence.replaceChildren();
+      flowEvidence.hidden = false;
+      const from = graph.nodes.find((n) => n.id === edge.from),
+        to = graph.nodes.find((n) => n.id === edge.to);
+      flowEvidence.append(
+        make("h3", "", from.title + " → " + to.title),
+        make(
+          "p",
+          "",
+          edge.label +
+            " · " +
+            (edge.certainty === "confirmed"
+              ? "已確認靜態關聯"
+              : "可能相關，尚未確認執行時目標"),
+        ),
+      );
+      for (const record of edge.evidence || []) {
+        const item = button(
+          record.file + ":" + record.line + ":" + record.column,
+          "",
+          () =>
+            window.dispatchEvent(
+              new CustomEvent("locator:open-block", { detail: record }),
+            ),
+        );
+        item.classList.add("component-flow-proof");
+        const source = window.LocatorIndex.source(record.file) || "";
+        item.append(
+          make(
+            "code",
+            "",
+            source.slice(record.start, Math.min(record.end, record.start + 220)),
+          ),
+        );
+        flowEvidence.append(item);
+      }
+      if (!edge.evidence?.length)
+        flowEvidence.append(
+          make("p", "", "這條關聯尚無可定位的呼叫語句，請對照兩端函式原始碼。"),
+        );
+      flowEvidence.append(
+        button("關閉連線依據", "", () => {
+          flowEvidence.hidden = true;
+        }),
+      );
+      flowEvidence.scrollIntoView({ block: "nearest" });
+    }
     flowWorld.replaceChildren();
     flowCanvas.hidden = true;
     flowNote.textContent = "正在整理元件變數與完整函式…";

@@ -384,8 +384,7 @@
       data.results = data.results.filter((r) => r.type !== "text");
       result = data;
       const graph = data.flow || { nodes: [], edges: [] };
-      const shown = graph.nodes.slice(0, 100),
-        shownIDs = new Set(shown.map((n) => n.id));
+      const shown = graph.nodes;
       window.dispatchEvent(
         new CustomEvent("locator:function-flow", {
           detail: {
@@ -409,11 +408,10 @@
               source: (window.LocatorIndex.source(r.file) || "").slice(r.start, r.end),
               note: r.certainty === "possible" ? "可能相關，尚未確認執行時目標" : "",
             })),
-            edges: graph.edges.filter((e) => shownIDs.has(e.from) && shownIDs.has(e.to)),
-            warnings:
-              graph.nodes.length > 100
-                ? ["畫布先顯示 100 個區塊；下方函式清單仍保留其他結果。"]
-                : [],
+            edges: graph.edges,
+            warnings: data.gaps?.length
+              ? ["索引有 " + data.gaps.length + " 項待確認，可查看下方搜尋範圍與缺口。"]
+              : [],
           },
         }),
       );

@@ -35,7 +35,12 @@
   $(".brand small").textContent = "選取畫面，找到原始檔與行號。";
   const nav = make("nav", "canvas-nav");
   nav.setAttribute("aria-label", "工作區顯示方式");
-  const canvasButton = button("流程畫布", "grid", () => setList(false), "active");
+  const canvasButton = button(
+    "流程畫布",
+    "grid",
+    () => setList(false),
+    "active",
+  );
   const listButton = button("列表", "list", () => setList(true));
   nav.append(canvasButton, listButton);
   header.insertBefore(nav, $(".top-actions"));
@@ -74,7 +79,7 @@
   const hint = make(
     "p",
     "canvas-hint",
-    "拖曳空白處平移 · 拖曳節點標題移動 · Ctrl / ⌘ + 滾輪縮放",
+    "拖曳標題移動 · Ctrl / ⌘ + 滾輪縮放 ·「調整連線」自動儲存",
   );
   canvas.append(hint);
   main.prepend(canvas);
@@ -92,20 +97,39 @@
     heading.tabIndex = 0;
     heading.setAttribute("role", "group");
     heading.setAttribute("aria-label", title + "節點；可拖曳或按方向鍵移動");
-    heading.append(
-      make("span", "flow-port port-in"),
-      make("h2", "", title),
-      make("span", "node-grip", "⠿"),
-      make("span", "flow-port port-out"),
-    );
+    heading.append(make("h2", "", title), make("span", "node-grip", "⠿"));
     const body = make("div", "flow-node-content");
     el.append(label, heading, body);
     world.append(el);
     return { el, body, heading };
   }
-  const source = createNode("source-node", "專案來源", "Source", "green", 40, 230, 280);
-  const pages = createNode("pages-node", "頁面與入口", "Pages", "green", 380, 70, 300);
-  const tree = createNode("tree-node", "HTML 結構", "Structure", "blue", 380, 365, 300);
+  const source = createNode(
+    "source-node",
+    "專案來源",
+    "Source",
+    "green",
+    40,
+    230,
+    280,
+  );
+  const pages = createNode(
+    "pages-node",
+    "頁面與入口",
+    "Pages",
+    "green",
+    380,
+    70,
+    300,
+  );
+  const tree = createNode(
+    "tree-node",
+    "HTML 結構",
+    "Structure",
+    "blue",
+    380,
+    365,
+    300,
+  );
   const inspector = createNode(
     "inspector-node",
     "元素解析",
@@ -148,7 +172,9 @@
   );
   pages.body.append(pageEmpty);
   const pageTools = make("div", "node-tools");
-  const pageListButton = button("所有頁面", "list", () => openDialog(pagesDialog));
+  const pageListButton = button("所有頁面", "list", () =>
+    openDialog(pagesDialog),
+  );
   const fileMapButton = button("檔案地圖", "folder", () => {
     $("#project-map").open = true;
     openDialog(mapDialog);
@@ -174,7 +200,9 @@
   const viewer = $(".viewer");
   preview.body.append(viewer);
   const inspectActions = make("div", "node-preview-actions");
-  inspectActions.append(button("尋找元件相關程式碼", "code", () => openComponent()));
+  inspectActions.append(
+    button("尋找元件相關程式碼", "code", () => openComponent()),
+  );
   viewer.append(inspectActions);
   const previewEmpty = make("div", "preview-empty");
   const diagram = make("div", "preview-wireframe");
@@ -242,13 +270,23 @@
   const warningsDialog = createDialog("分析範圍與讀取紀錄", "warnings-dialog");
   warningsDialog.append($("#warnings"));
   $("#warnings").open = true;
-  const infoButton = button("讀取紀錄", "list", () => openDialog(warningsDialog));
+  const infoButton = button("讀取紀錄", "list", () =>
+    openDialog(warningsDialog),
+  );
   metrics.append(infoButton);
   const oldEmpty = $("#empty-state");
   oldEmpty.hidden = true;
-  const emptyFileMap = make("p", "muted", "選取資料夾後，這裡會顯示完整檔案地圖。");
+  const emptyFileMap = make(
+    "p",
+    "muted",
+    "選取資料夾後，這裡會顯示完整檔案地圖。",
+  );
   mapDialog.append(emptyFileMap);
-  const emptyPageMap = make("p", "muted", "選取資料夾後，這裡會列出每個頁面的分析結果。");
+  const emptyPageMap = make(
+    "p",
+    "muted",
+    "選取資料夾後，這裡會列出每個頁面的分析結果。",
+  );
   pagesDialog.append(emptyPageMap);
   const graph = [
     [source, pages],
@@ -299,20 +337,31 @@
   function drawEdges() {
     cancelAnimationFrame(edgeFrame);
     edgeFrame = requestAnimationFrame(() => {
-      const root = world.getBoundingClientRect();
-      graph.forEach(([from, to], i) => {
-        const a = from.el.querySelector(".port-out").getBoundingClientRect();
-        const b = to.el.querySelector(".port-in").getBoundingClientRect();
-        const x1 = (a.left + a.width / 2 - root.left) / scale,
-          y1 = (a.top + a.height / 2 - root.top) / scale;
-        const x2 = (b.left + b.width / 2 - root.left) / scale,
-          y2 = (b.top + b.height / 2 - root.top) / scale;
-        const bend = Math.max(50, Math.abs(x2 - x1) * 0.5);
+      const connections = graph.map(([from, to], i) => {
+        const box = (el) => ({
+          x: el.offsetLeft,
+          y: el.offsetTop,
+          width: el.offsetWidth,
+          height: el.offsetHeight,
+        });
+        const id = JSON.stringify([from.el.id, to.el.id]);
+        const a = box(from.el),
+          b = box(to.el);
         paths[i].setAttribute(
           "d",
-          `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`,
+          WireLayout.route(a, b, mainWires.state.routes[id]).d,
         );
+        return {
+          id,
+          a,
+          b,
+          label:
+            from.heading.querySelector("h2").textContent +
+            " → " +
+            to.heading.querySelector("h2").textContent,
+        };
       });
+      mainWires.sync(connections);
     });
   }
   const zoomTools = make("div", "canvas-zoom");
@@ -330,7 +379,9 @@
       n.el.style.left = n.el.dataset.x + "px";
       n.el.style.top = n.el.dataset.y + "px";
     }
+    mainWires.clear();
     reflow();
+    mainWires.saveNodes(boxes());
     initialView();
   });
   reset.title = "重設畫布";
@@ -338,6 +389,21 @@
   zoomTools.append(zoomOut, zoomLabel, zoomIn, fit, reset);
   canvas.append(zoomTools);
   const nodes = [source, pages, tree, inspector, preview];
+  const mainWireTools = make("div", "main-wire-tools");
+  document.body.append(mainWireTools);
+  const mainWires = new WireLayout.Editor(
+    world,
+    mainWireTools,
+    "main",
+    drawEdges,
+  );
+  for (const node of nodes) {
+    const saved = mainWires.state.nodes[node.el.id];
+    if (saved && saved.x >= 0 && saved.y >= 35) {
+      node.el.style.left = saved.x + "px";
+      node.el.style.top = saved.y + "px";
+    }
+  }
   const frame = $("#preview");
   let previewMode = "full",
     previewFullPage = false,
@@ -395,9 +461,13 @@
   function setCardSize(node, width, height) {
     node.el.classList.add("is-sized");
     node.el.style.width =
-      Math.round(Math.max(node === preview ? 320 : 240, Math.min(2600, width))) + "px";
+      Math.round(
+        Math.max(node === preview ? 320 : 240, Math.min(2600, width)),
+      ) + "px";
     node.el.style.height =
-      Math.round(Math.max(node === preview ? 360 : 200, Math.min(24000, height))) + "px";
+      Math.round(
+        Math.max(node === preview ? 360 : 200, Math.min(24000, height)),
+      ) + "px";
     reflow();
     drawEdges();
   }
@@ -412,7 +482,8 @@
   }
   function updatePreviewSize() {
     viewer.querySelector('[data-view="preview"]').click();
-    if (previewMode !== "full") preview.el.style.width = Number(previewMode) + 30 + "px";
+    if (previewMode !== "full")
+      preview.el.style.width = Number(previewMode) + 30 + "px";
     preview.el.style.setProperty("--preview-height", previewHeight + 2 + "px");
     if (previewFullPage) {
       try {
@@ -480,7 +551,8 @@
     resetSize.onclick = () => {
       node.el.classList.remove("is-sized");
       node.el.style.height = "";
-      node.el.style.width = (node === source ? 280 : node === preview ? 610 : 300) + "px";
+      node.el.style.width =
+        (node === source ? 280 : node === preview ? 610 : 300) + "px";
       if (node === preview) {
         previewMode = "full";
         previewFullPage = false;
@@ -527,7 +599,8 @@
       setCardSize(node, width, height);
       if (node === preview) {
         const minimum = previewOverhead() + 122;
-        if (node.el.offsetHeight < minimum) node.el.style.height = minimum + "px";
+        if (node.el.offsetHeight < minimum)
+          node.el.style.height = minimum + "px";
         previewHeight = node.el.offsetHeight - previewOverhead() - 2;
         node.el.style.setProperty("--preview-height", previewHeight + 2 + "px");
         refreshPreviewNote();
@@ -560,7 +633,8 @@
       };
     };
     grip.onkeydown = (e) => {
-      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key))
+        return;
       e.preventDefault();
       e.stopPropagation();
       resizeCard(
@@ -576,7 +650,11 @@
     zoomLabel.value = Math.round(scale * 100) + "%";
     drawEdges();
   }
-  function zoom(value, x = canvas.clientWidth / 2, y = canvas.clientHeight / 2) {
+  function zoom(
+    value,
+    x = canvas.clientWidth / 2,
+    y = canvas.clientHeight / 2,
+  ) {
     viewTouched = true;
     y -= world.offsetTop;
     const next = Math.max(0.02, Math.min(2, value));
@@ -594,8 +672,10 @@
   }
   function fitView() {
     viewTouched = true;
-    const right = Math.max(...nodes.map((n) => n.el.offsetLeft + n.el.offsetWidth)) + 40;
-    const bottom = Math.max(...nodes.map((n) => n.el.offsetTop + n.el.offsetHeight)) + 60;
+    const right =
+      Math.max(...nodes.map((n) => n.el.offsetLeft + n.el.offsetWidth)) + 40;
+    const bottom =
+      Math.max(...nodes.map((n) => n.el.offsetTop + n.el.offsetHeight)) + 60;
     scale = Math.max(
       0.02,
       Math.min(
@@ -623,7 +703,8 @@
     }
     viewTouched = true;
     tx =
-      (canvas.clientWidth - node.el.offsetWidth * scale) / 2 - node.el.offsetLeft * scale;
+      (canvas.clientWidth - node.el.offsetWidth * scale) / 2 -
+      node.el.offsetLeft * scale;
     ty = 100 - node.el.offsetTop * scale;
     transform();
     node.heading.focus({ preventScroll: true });
@@ -647,9 +728,18 @@
       document.body.classList.contains("canvas-list")
     )
       return;
-    if (e.target.closest(".node-resize-handle,.node-size-reset")) return;
+    if (
+      e.target.closest(
+        ".node-resize-handle,.node-size-reset,.wire-handle,.main-wire-tools",
+      )
+    )
+      return;
     const heading = e.target.closest(".flow-node-heading");
-    if (!heading && e.target.closest(".flow-node,button,a,input,select,textarea")) return;
+    if (
+      !heading &&
+      e.target.closest(".flow-node,button,a,input,select,textarea")
+    )
+      return;
     viewTouched = true;
     dragging = {
       id: e.pointerId,
@@ -682,6 +772,7 @@
     }
   });
   function endDrag() {
+    if (dragging?.node) mainWires.saveNodes(boxes());
     dragging?.node?.classList.remove("movement-blocked");
     dragging = null;
     canvas.classList.remove("is-panning");
@@ -711,7 +802,11 @@
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         const rect = canvas.getBoundingClientRect();
-        zoom(scale - e.deltaY * 0.002, e.clientX - rect.left, e.clientY - rect.top);
+        zoom(
+          scale - e.deltaY * 0.002,
+          e.clientX - rect.left,
+          e.clientY - rect.top,
+        );
       } else if (!e.target.closest(".flow-node,button")) {
         e.preventDefault();
         viewTouched = true;
@@ -740,10 +835,12 @@
         ),
         Math.max(
           35,
-          n.el.offsetTop + (e.key === "ArrowDown" ? 15 : e.key === "ArrowUp" ? -15 : 0),
+          n.el.offsetTop +
+            (e.key === "ArrowDown" ? 15 : e.key === "ArrowUp" ? -15 : 0),
         ),
       );
       setTimeout(() => n.el.classList.remove("movement-blocked"), 250);
+      mainWires.saveNodes(boxes());
     });
   const detail = make("section", "component-workspace");
   detail.id = "component-workspace";
@@ -782,7 +879,8 @@
       );
       if (request === detailRequest) componentCode.textContent = formatted;
     } catch (e) {
-      if (request === detailRequest) detailMeta.textContent = "排版未完成：" + e.message;
+      if (request === detailRequest)
+        detailMeta.textContent = "排版未完成：" + e.message;
     } finally {
       if (request === detailRequest) formatButton.disabled = false;
     }
@@ -820,6 +918,8 @@
   const flowPlus = button("+", "", () => changeFlowScale(0.1));
   const flowReset = button("重設排列", "", () => {
     functionPositions.clear();
+    functionWires.state.nodes = {};
+    functionWires.save();
     renderComponentFlow();
   });
   flowMinus.setAttribute("aria-label", "縮小元件流程圖");
@@ -829,7 +929,10 @@
   const flowNote = make("p", "component-flow-note");
   const flowCanvas = make("div", "component-flow-canvas");
   flowCanvas.tabIndex = 0;
-  flowCanvas.setAttribute("aria-label", "元件程式碼關聯畫布，可捲動瀏覽及拖曳節點");
+  flowCanvas.setAttribute(
+    "aria-label",
+    "元件程式碼關聯畫布，可捲動瀏覽及拖曳節點",
+  );
   const flowSpace = make("div", "component-flow-space");
   const flowWorld = make("div", "component-flow-world");
   flowSpace.append(flowWorld);
@@ -838,7 +941,13 @@
   flowEvidence.hidden = true;
   flowEvidence.setAttribute("aria-label", "連線原始碼依據");
   const flowConnections = make("details", "component-flow-connections");
-  flowSection.append(flowTop, flowNote, flowCanvas, flowEvidence, flowConnections);
+  flowSection.append(
+    flowTop,
+    flowNote,
+    flowCanvas,
+    flowEvidence,
+    flowConnections,
+  );
   detail.append(detailTop, detailHeading, flowSection, columns);
   document.body.append(detail);
   let detailRequest = 0,
@@ -871,8 +980,13 @@
       ),
     );
     for (const record of edge.evidence || []) {
-      const item = button(record.file + ":" + record.line + ":" + record.column, "", () =>
-        window.dispatchEvent(new CustomEvent("locator:open-block", { detail: record })),
+      const item = button(
+        record.file + ":" + record.line + ":" + record.column,
+        "",
+        () =>
+          window.dispatchEvent(
+            new CustomEvent("locator:open-block", { detail: record }),
+          ),
       );
       item.classList.add("component-flow-proof");
       const source = window.LocatorIndex.source(record.file) || "";
@@ -900,29 +1014,64 @@
     flowScale = Math.max(0.25, Math.min(1.5, flowScale + delta));
     flowWorld.style.transform = `scale(${flowScale})`;
     flowScaleLabel.textContent = Math.round(flowScale * 100) + "%";
-    flowSpace.style.width = Number(flowWorld.dataset.width || 1000) * flowScale + "px";
-    flowSpace.style.height = Number(flowWorld.dataset.height || 400) * flowScale + "px";
+    flowSpace.style.width =
+      Number(flowWorld.dataset.width || 1000) * flowScale + "px";
+    flowSpace.style.height =
+      Number(flowWorld.dataset.height || 400) * flowScale + "px";
   }
+  let functionLayoutKey = "";
+  const functionWires = new WireLayout.Editor(
+    flowWorld,
+    flowTop,
+    "functions-empty",
+    () => renderComponentFlow(),
+  );
   function renderComponentFlow(input) {
-    const previousScroll = { left: flowCanvas.scrollLeft, top: flowCanvas.scrollTop };
+    const previousScroll = {
+      left: flowCanvas.scrollLeft,
+      top: flowCanvas.scrollTop,
+    };
     if (input) {
       currentFunctionFlow = input;
       expandedFunctions.clear();
       showAllFunctions = false;
       functionLimit = 40;
-      functionPositions.clear();
+      functionLayoutKey =
+        "functions-" +
+        WireLayout.hash(
+          JSON.stringify([
+            selectedProject.textContent,
+            input.nodes
+              .map((n) => [n.id, n.file, n.title, n.source])
+              .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+          ]),
+        );
+      functionWires.setScope(functionLayoutKey);
+      functionPositions = new Map(Object.entries(functionWires.state.nodes));
       flowEvidence.hidden = true;
     }
-    const complete = currentFunctionFlow || { nodes: [], edges: [], warnings: [] };
+    const complete = currentFunctionFlow || {
+      nodes: [],
+      edges: [],
+      warnings: [],
+    };
     const projection = window.FunctionFlow.view(
       complete,
       expandedFunctions,
       showAllFunctions,
       functionLimit,
     );
-    const graph = { ...complete, nodes: projection.nodes, edges: projection.edges };
+    const graph = {
+      ...complete,
+      nodes: projection.nodes,
+      edges: projection.edges,
+    };
     flowConnections.replaceChildren(
-      make("summary", "", "連線清單 · " + graph.edges.length + " 條（可查看原始碼依據）"),
+      make(
+        "summary",
+        "",
+        "連線清單 · " + graph.edges.length + " 條（可查看原始碼依據）",
+      ),
     );
     for (const edge of graph.edges) {
       const a = complete.nodes.find((n) => n.id === edge.from),
@@ -936,13 +1085,15 @@
     flowAll.textContent = showAllFunctions ? "逐層瀏覽" : "展開全部";
     flowAll.setAttribute("aria-pressed", String(showAllFunctions));
     flowMore.hidden = projection.remaining === 0;
-    flowMore.textContent = "再顯示 40 個區塊（尚有 " + projection.remaining + " 個）";
+    flowMore.textContent =
+      "再顯示 40 個區塊（尚有 " + projection.remaining + " 個）";
     const first =
       graph.nodes.find((n) => n.kind === "functions") ||
       graph.nodes.find((n) => n.kind === "bindings") ||
       graph.nodes[0];
     if (first) explainJS(first.source);
     else jsLearning.hidden = true;
+    functionWires.layer.remove();
     flowWorld.replaceChildren();
     flowNote.textContent =
       "先看元件變數、事件與直接處理函式，按節點的「展開下游」繼續追查。點函式看整段原檔，點連線看依據。" +
@@ -954,6 +1105,7 @@
       (graph.warnings.length ? " · " + graph.warnings.join("；") : "");
     if (!graph.nodes.length) {
       flowCanvas.hidden = true;
+      functionWires.sync([]);
       flowConnections.hidden = true;
       flowNote.textContent +=
         " 尚未找到可連線的元件變數或函式。請查看下方搜尋範圍：來源缺失、解析失敗或動態寫法都可能讓關聯不完整。";
@@ -997,7 +1149,10 @@
       );
       const snippet = make("button", "component-flow-snippet");
       snippet.type = "button";
-      snippet.setAttribute("aria-label", "查看 " + node.title + " 的完整程式碼");
+      snippet.setAttribute(
+        "aria-label",
+        "查看 " + node.title + " 的完整程式碼",
+      );
       snippet.append(
         make(
           "pre",
@@ -1048,7 +1203,8 @@
               " 個區塊",
             "",
             () => {
-              if (expandedFunctions.has(node.id)) expandedFunctions.delete(node.id);
+              if (expandedFunctions.has(node.id))
+                expandedFunctions.delete(node.id);
               else expandedFunctions.add(node.id);
               showAllFunctions = false;
               renderComponentFlow();
@@ -1068,7 +1224,9 @@
         if (upstream.length)
           actions.append(
             button("上游 · " + upstream.length + " 個區塊", "", () => {
-              flowEvidence.replaceChildren(make("h3", "", node.title + " 的上游關聯"));
+              flowEvidence.replaceChildren(
+                make("h3", "", node.title + " 的上游關聯"),
+              );
               flowEvidence.hidden = false;
               for (const edge of upstream) {
                 const from = complete.nodes.find((n) => n.id === edge.from);
@@ -1133,21 +1291,30 @@
           left = card.offsetLeft,
           top = card.offsetTop;
         heading.onpointermove = (ev) =>
-          move(left + (ev.clientX - x) / flowScale, top + (ev.clientY - y) / flowScale);
+          move(
+            left + (ev.clientX - x) / flowScale,
+            top + (ev.clientY - y) / flowScale,
+          );
         heading.onpointerup = () => {
           heading.onpointermove = null;
           card.classList.remove("movement-blocked");
+          functionWires.saveNodes(geometry());
         };
         heading.onpointercancel = heading.onpointerup;
       };
       heading.onkeydown = (e) => {
-        if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+        if (
+          !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
+        )
+          return;
         e.preventDefault();
         move(
           card.offsetLeft +
             (e.key === "ArrowRight" ? 15 : e.key === "ArrowLeft" ? -15 : 0),
-          card.offsetTop + (e.key === "ArrowDown" ? 15 : e.key === "ArrowUp" ? -15 : 0),
+          card.offsetTop +
+            (e.key === "ArrowDown" ? 15 : e.key === "ArrowUp" ? -15 : 0),
         );
+        functionWires.saveNodes(geometry());
         setTimeout(() => card.classList.remove("movement-blocked"), 250);
       };
     }
@@ -1183,23 +1350,44 @@
       defs.append(marker);
       edges.append(defs);
       const map = new Map(cards.map((c) => [c.id, c.el]));
+      const connections = [];
       for (const edge of graph.edges) {
         const a = map.get(edge.from),
           b = map.get(edge.to);
         if (!a || !b) continue;
-        const x = a.offsetLeft + a.offsetWidth,
-          y = a.offsetTop + 25,
-          tx = b.offsetLeft,
-          ty = b.offsetTop + 25;
+        const box = (el) => ({
+          x: el.offsetLeft,
+          y: el.offsetTop,
+          width: el.offsetWidth,
+          height: el.offsetHeight,
+        });
+        const id = JSON.stringify([edge.from, edge.to, edge.label]);
         const path = document.createElementNS(edges.namespaceURI, "path");
+        const connection = {
+          id,
+          a: box(a),
+          b: box(b),
+          self: edge.from === edge.to,
+          label:
+            mapTitle(edge.from) +
+            " → " +
+            mapTitle(edge.to) +
+            " · " +
+            edge.label,
+        };
+        connections.push(connection);
         path.setAttribute(
           "d",
-          edge.from === edge.to
-            ? `M${x} ${y} C${x + 90} ${y - 85} ${tx - 90} ${ty - 85} ${tx} ${ty}`
-            : `M${x} ${y} C${x + 60} ${y} ${tx - 60} ${ty} ${tx} ${ty}`,
+          WireLayout.route(
+            connection.a,
+            connection.b,
+            functionWires.state.routes[id],
+            connection.self,
+          ).d,
         );
         path.setAttribute("marker-end", "url(#component-flow-arrow)");
-        if (edge.certainty === "possible") path.setAttribute("stroke-dasharray", "5 5");
+        if (edge.certainty === "possible")
+          path.setAttribute("stroke-dasharray", "5 5");
         const hit = document.createElementNS(edges.namespaceURI, "path");
         hit.setAttribute("d", path.getAttribute("d"));
         hit.classList.add("component-flow-edge-hit");
@@ -1229,8 +1417,13 @@
         path.append(title);
         edges.append(path, hit);
       }
+      functionWires.sync(connections);
       changeFlowScale(0);
     }
+    // Keep handle elements alive during dragging; rebuilding cards would lose pointer capture.
+    functionWires.redraw = draw;
+    for (const c of cards)
+      functionPositions.set(c.id, { x: c.el.offsetLeft, y: c.el.offsetTop });
     draw();
     flowCanvas.scrollTop = input ? 0 : previousScroll.top;
     flowCanvas.scrollLeft = input ? 0 : previousScroll.left;
@@ -1258,7 +1451,12 @@
     renderComponentFlow();
   });
   flowMore.hidden = true;
-  flowTop.append(fitFunctions, flowAll, flowMore);
+  const restoreFunctions = button("還原配置", "", () => {
+    functionPositions.clear();
+    functionWires.clear();
+    renderComponentFlow();
+  });
+  flowTop.append(fitFunctions, flowAll, flowMore, restoreFunctions);
   async function openComponent(id) {
     const selected = id
       ? window.PageWorkbench.selectComponent(id)
@@ -1281,7 +1479,8 @@
       const crumb = make("button", "", ancestor.label);
       crumb.type = "button";
       crumb.onclick = () => openComponent(ancestor.id);
-      if (ancestor.id === selected.id) crumb.setAttribute("aria-current", "page");
+      if (ancestor.id === selected.id)
+        crumb.setAttribute("aria-current", "page");
       crumbs.append(crumb);
     }
     childTitle.textContent = "子元件 · " + selected.children.length;
@@ -1294,7 +1493,9 @@
         make(
           "span",
           "",
-          child.text ? child.text.slice(0, 90) : "點入查看這個元件的結構與程式碼",
+          child.text
+            ? child.text.slice(0, 90)
+            : "點入查看這個元件的結構與程式碼",
         ),
         make("i", "", "→"),
       );
@@ -1302,7 +1503,9 @@
       childList.append(childButton);
     }
     if (!selected.children.length)
-      childList.append(make("p", "component-leaf", "這是最內層元件，沒有其他子元素。"));
+      childList.append(
+        make("p", "component-leaf", "這是最內層元件，沒有其他子元素。"),
+      );
     detailSource = "";
     detailKind = "html";
     teachButton.disabled = true;
@@ -1347,7 +1550,10 @@
           make(
             "code",
             "",
-            source.slice(record.start, Math.min(record.end, record.start + 220)),
+            source.slice(
+              record.start,
+              Math.min(record.end, record.start + 220),
+            ),
           ),
         );
         flowEvidence.append(item);
@@ -1383,7 +1589,8 @@
       formatButton.disabled = false;
       copyButton.disabled = false;
       if (result.truncated)
-        detailMeta.textContent = "元件片段超過顯示上限，已截取前 200,000 字元。";
+        detailMeta.textContent =
+          "元件片段超過顯示上限，已截取前 200,000 字元。";
     } catch (error) {
       if (request === detailRequest) {
         componentCode.textContent = "讀取失敗：" + error.message;
@@ -1399,7 +1606,8 @@
     detailId = null;
     detailAnalysisId = null;
     detailSource = "";
-    if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    if (previousFocus?.isConnected)
+      previousFocus.focus({ preventScroll: true });
     reflow();
     drawEdges();
   }
@@ -1498,9 +1706,18 @@
     drawEdges();
   }
   const observer = new MutationObserver(update);
-  observer.observe($("#results"), { attributes: true, attributeFilter: ["hidden"] });
-  observer.observe(pageControls, { attributes: true, attributeFilter: ["hidden"] });
-  observer.observe($("#project-map"), { attributes: true, attributeFilter: ["hidden"] });
+  observer.observe($("#results"), {
+    attributes: true,
+    attributeFilter: ["hidden"],
+  });
+  observer.observe(pageControls, {
+    attributes: true,
+    attributeFilter: ["hidden"],
+  });
+  observer.observe($("#project-map"), {
+    attributes: true,
+    attributeFilter: ["hidden"],
+  });
   observer.observe($("#project-pages-overview"), {
     attributes: true,
     attributeFilter: ["hidden"],

@@ -392,6 +392,14 @@
   const nodes = [source, pages, tree, inspector, preview];
   const mainWireTools = make("div", "main-wire-tools");
   document.body.append(mainWireTools);
+  // Reserve a separate toolbar row; wrapping must never cover the canvas caption or cards.
+  new ResizeObserver(() => {
+    document.body.style.setProperty(
+      "--wire-tools-bottom",
+      Math.ceil(mainWireTools.getBoundingClientRect().bottom + 12) + "px",
+    );
+  }).observe(mainWireTools);
+
   const mainWires = new WireLayout.Editor(
     world,
     mainWireTools,
@@ -1015,6 +1023,7 @@
   function changeFlowScale(delta) {
     flowScale = Math.max(0.25, Math.min(1.5, flowScale + delta));
     flowWorld.style.transform = `scale(${flowScale})`;
+    flowWorld.style.setProperty("--wire-handle-scale", String(1 / flowScale));
     flowScaleLabel.textContent = Math.round(flowScale * 100) + "%";
     flowSpace.style.width =
       Number(flowWorld.dataset.width || 1000) * flowScale + "px";

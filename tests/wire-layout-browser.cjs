@@ -170,7 +170,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
       .click();
     await clickPoint(world, { x: 360, y: 120 });
     await page
-      .getByRole("button", { name: "離開畫線模式", exact: true })
+      .getByRole("button", { name: "離開接線模式", exact: true })
       .first()
       .click();
     assert.deepEqual((await state()).routes, saved.routes);

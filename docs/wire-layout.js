@@ -187,15 +187,21 @@
       this.label = document.createElement("span");
       this.label.className = "wire-selection-label";
       this.controls.append(this.label);
-      this.exitButton = button("離開畫線模式", () => {
+      this.enterButton = button("進入接線模式", () => {
+        this.enabled = true;
+        this.sync(this.connections);
+        this.status.textContent = "接線模式：點選一條線或圓形接點，再逐點重畫";
+      });
+      this.exitButton = button("離開接線模式", () => {
         const hadDraft = !!this.draft;
+        this.enabled = false;
         this.draft = null;
         this.preview = null;
         this.selected = null;
         this.sync(this.connections);
         this.status.textContent = hadDraft
-          ? "已離開畫線模式，未完成的草稿已取消"
-          : "已離開畫線模式";
+          ? "已離開接線模式，未完成的草稿已取消"
+          : "已離開接線模式";
       });
       this.drawButton = button("逐點重畫", () => this.startDrawing());
       this.finishButton = button("完成接線", () => this.finishDrawing());
@@ -218,6 +224,7 @@
       this.controls.append(this.status);
       toolbar.append(this.controls);
       this.setScope(key);
+      this.sync([]);
       world.addEventListener("click", (e) => {
         if (e.target.closest("button,input,select,textarea,a,.wire-hit"))
           return;
@@ -254,6 +261,7 @@
     }
     setScope(key) {
       this.key = key;
+      this.enabled = false;
       let storage;
       try {
         storage = scope.localStorage;
@@ -297,6 +305,7 @@
       });
     }
     select(id) {
+      this.enabled = true;
       if (this.draft && this.selected !== id) this.draft = null;
       this.selected = id;
       this.sync(this.connections);
@@ -369,7 +378,13 @@
       if (!this.layer.isConnected) this.world.append(this.layer);
       const selected = connections.find((c) => c.id === this.selected);
       this.label.textContent = selected ? selected.label : "點擊連線以調整";
-      this.exitButton.disabled = !selected && !this.draft;
+      this.enterButton.disabled = this.enabled;
+      this.enterButton.setAttribute("aria-pressed", String(this.enabled));
+      this.exitButton.disabled = !this.enabled;
+      const scale =
+        this.world.getBoundingClientRect().width / this.world.offsetWidth;
+      if (Number.isFinite(scale) && scale > 0)
+        this.world.style.setProperty("--wire-handle-scale", String(1 / scale));
       this.evidence.hidden = !selected?.evidence || !!this.draft;
       for (const b of [this.drawButton, this.reset])
         b.hidden = !selected || !!this.draft;

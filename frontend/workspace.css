@@ -2252,3 +2252,17 @@ body.component-mode .canvas-metrics {
 .wire-handle-end { width:10px; height:10px; border-color:#8fba9c; background:#1c2d23; }
 .wire-handle-end.is-selected { width:12px; height:12px; border-color:#d4f7de; background:#477e55; }
 .wire-toolbar button:disabled { opacity:.45; cursor:default; }
+
+/* Wiring has a dedicated row below navigation; metrics keep the bottom row. */
+.main-wire-tools { top:88px; bottom:auto; left:24px; right:24px; max-width:none; }
+.main-wire-tools .wire-toolbar { min-height:48px; box-sizing:border-box; }
+.flow-world { top:calc(var(--wire-tools-bottom, 150px) + 34px); }
+.canvas-caption { top:var(--wire-tools-bottom, 150px); }
+.wire-toolbar button { min-height:34px; }
+.wire-toolbar button[aria-pressed="true"] { border-color:#c4f5cf; background:#36543f; }
+.wire-handle { transform:translate(-50%,-50%) scale(var(--wire-handle-scale, 1)); }
+.wire-handle-end { width:14px; height:14px; border:2px solid #d1f9dc; background:#315e3e; box-shadow:0 0 0 2px #101b14; }
+.wire-handle-end.is-selected { width:16px; height:16px; border-color:#fff; background:#6da77c; }
+@media(max-width:760px) {
+  .flow-world, body.canvas-list .flow-world { top:auto; }
+}

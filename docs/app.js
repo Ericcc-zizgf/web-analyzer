@@ -182,7 +182,8 @@
     tree.replaceChildren();
     if (!report) return;
     const query = $("#tree-search").value.trim().toLowerCase(),
-      visible = new Set();
+      visible = new Set(),
+      matched = new Set();
     if (query)
       for (const n of report.nodes)
         if (
@@ -196,6 +197,7 @@
             .toLowerCase()
             .includes(query)
         ) {
+          matched.add(n.id);
           for (let p = n; p && !visible.has(p.id); p = nodes.get(p.parent))
             visible.add(p.id);
         }
@@ -224,6 +226,27 @@
       const item = button(label(n), () => selectNode(n.id));
       item.className = "tree-item" + (selected === n.id ? " selected" : "");
       item.dataset.node = n.id;
+      const landmark = [
+        "header",
+        "nav",
+        "main",
+        "section",
+        "article",
+        "aside",
+        "footer",
+        "form",
+      ].includes(n.tag);
+      item.classList.toggle("is-landmark", landmark);
+      if (landmark) item.setAttribute("aria-label", label(n) + " · 主要區塊");
+      if (query && matched.has(n.id)) {
+        const path = [];
+        for (let p = nodes.get(n.parent); p; p = nodes.get(p.parent))
+          path.unshift(label(p));
+        if (path.length)
+          item.append(
+            make("span", path.slice(-4).join(" › "), "tree-search-context"),
+          );
+      }
       item.setAttribute("aria-pressed", String(selected === n.id));
       item.title = label(n) + " " + (n.text || "");
       row.append(toggle, item);
@@ -327,7 +350,7 @@
     );
     if (n.text)
       box.append(make("h3", "直接文字"), make("p", n.text, "element-text"));
-    const line = n.location?.line || n.line;
+    const line = n.location?.line;
     box.append(
       make(
         "p",
@@ -343,6 +366,14 @@
         "muted",
       ),
     );
+    if (!n.location)
+      box.append(
+        make(
+          "p",
+          "此元素可能由瀏覽器補建，或無法唯一對應來源；原始碼不會猜測高亮位置。",
+          "source-location-note",
+        ),
+      );
     const actions = make("div", undefined, "node-buttons");
     if (n.parent && nodes.has(n.parent))
       actions.append(button("選取父元素", () => selectNode(n.parent)));
@@ -364,7 +395,7 @@
   function selectNode(id, fromPreview = false) {
     if (!nodes.has(id)) return;
     selected = id;
-    $("#tree-search").value = "";
+    if (fromPreview) $("#tree-search").value = "";
     for (let n = nodes.get(id); n?.parent; n = nodes.get(n.parent))
       expanded.add(n.parent);
     renderTree();
@@ -426,6 +457,8 @@
       renderSource();
       return;
     }
+    sourceText = "";
+    $("#source-code").replaceChildren();
     $("#source-meta").textContent = "正在讀取元素片段…";
     try {
       const path = "/api/analysis/" + report.id + "/node/" + selected,
@@ -505,6 +538,24 @@
       expanded = new Set(
         report.nodes.filter((n) => n.depth < 2).map((n) => n.id),
       );
+      for (const region of report.nodes.filter(
+        (n) =>
+          [
+            "header",
+            "nav",
+            "main",
+            "section",
+            "article",
+            "aside",
+            "footer",
+          ].includes(n.tag) && n.depth <= 4,
+      ))
+        for (
+          let parent = nodes.get(region.parent);
+          parent;
+          parent = nodes.get(parent.parent)
+        )
+          expanded.add(parent.id);
       selected =
         report.nodes.find((n) => n.tag === "body")?.id ||
         report.nodes[0]?.id ||
@@ -547,8 +598,28 @@
     if (!doc?.head) return;
     const style = doc.createElement("style");
     style.textContent =
-      "[data-analyzer-selected]{outline:2px solid #92e4ac!important;outline-offset:2px!important;box-shadow:0 0 0 4px #14251b99!important;}";
+      "[data-analyzer-selected]{outline:2px solid #b8a6f3!important;outline-offset:2px!important;box-shadow:0 0 0 4px #171224aa!important;} [data-analyzer-hover]:not([data-analyzer-selected]){outline:2px dashed #cabbff!important;outline-offset:2px!important;}";
     doc.head.append(style);
+    let hovered = null;
+    doc.addEventListener("pointerover", (e) => {
+      if (e.pointerType === "touch") return;
+      const interactive = e.target.closest(
+        'button,a,input,select,textarea,[role="button"]',
+      );
+      const target = interactive?.hasAttribute("data-web-analyzer-node")
+        ? interactive
+        : e.target.closest("[data-web-analyzer-node]");
+      if (target === hovered) return;
+      if (hovered) hovered.removeAttribute("data-analyzer-hover");
+      hovered = target;
+      if (hovered) hovered.setAttribute("data-analyzer-hover", "");
+    });
+    doc.addEventListener("pointerout", (e) => {
+      if (hovered && !hovered.contains(e.relatedTarget)) {
+        hovered.removeAttribute("data-analyzer-hover");
+        hovered = null;
+      }
+    });
     doc.addEventListener("click", (e) => {
       e.preventDefault();
       const interactive = e.target.closest(

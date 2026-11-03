@@ -12,7 +12,8 @@
     sources = new Map(),
     project = null,
     profiles = [],
-    limit = 20;
+    limit = 20,
+    lastPageKey = "";
   function status(text) {
     $("#project-status").textContent = text;
   }
@@ -54,6 +55,11 @@
       report: project,
     });
     if (request !== pageSerial || run !== generation) return;
+    if (ok && lastPageKey) {
+      try {
+        localStorage.setItem(lastPageKey, path);
+      } catch {}
+    }
     $("#project-page-status").textContent = ok
       ? "目前頁面：" + path
       : "未完成：" + PageWorkbench.lastStatus();
@@ -93,6 +99,14 @@
         skipped: input.skipped,
       };
       profiles = ProjectPage.profiles(project, sources);
+      let hash = 2166136261;
+      const identity = JSON.stringify([
+        input.root,
+        profiles.map((p) => p.path).sort(),
+      ]);
+      for (let i = 0; i < identity.length; i++)
+        hash = Math.imul(hash ^ identity.charCodeAt(i), 16777619);
+      lastPageKey = "web-analyzer:last-html-page:" + (hash >>> 0).toString(36);
       $("#project-name").textContent = input.root;
       $("#project-page").replaceChildren(
         ...profiles.map((p) => {
@@ -129,7 +143,16 @@
               " 個 HTML 頁面。選擇頁面即可查看結構。"
           : "沒有可讀取的 HTML 頁面。框架專案請先匯出或建置 HTML。",
       );
-      if (profiles.length) await openPage(profiles[0].path);
+      let previous = "";
+      try {
+        previous = localStorage.getItem(lastPageKey) || "";
+      } catch {}
+      if (profiles.length)
+        await openPage(
+          profiles.some((p) => p.path === previous)
+            ? previous
+            : profiles[0].path,
+        );
     } catch (e) {
       if (run === generation) status(e.message);
     } finally {

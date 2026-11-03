@@ -170,6 +170,16 @@
   const limitDetails = make("details", "source-limits");
   limitDetails.append(make("summary", "", "檔案範圍與分析限制"), limits);
   sourcePanel.append(limitDetails);
+  const journey = make("ol", "workspace-journey");
+  for (const label of [
+    "開啟專案／輸入網頁",
+    "執行預覽並選取元素",
+    "CSS 調整或追查 JavaScript",
+    "比較、復原與匯出 CSS",
+  ])
+    journey.append(make("li", "", label));
+  sourcePanel.append(journey);
+
   const selectedProject = make("p", "canvas-project-name", "尚未載入專案");
   sourcePanel.insertBefore(selectedProject, $(".project-actions"));
   const pageControls = $("#project-page-controls");
@@ -199,7 +209,9 @@
   );
   tree.body.append(treeEmpty);
   const inspectorPanel = $(".inspector");
-  inspector.body.append(inspectorPanel);
+  const cssSummary = make("div", "css-summary");
+  const cssExpand = button("展開 CSS 編輯面板", "code", () => openCSS());
+  inspector.body.append(cssSummary, cssExpand);
   const inspectorEmpty = make(
     "div",
     "node-empty",
@@ -248,20 +260,73 @@
       );
       return;
     }
-    const visible = graph.nodes.slice(0, 12),
+    const incoming = new Map(),
+      outgoing = new Map(),
+      byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    for (const edge of graph.edges) {
+      incoming.set(edge.to, (incoming.get(edge.to) || 0) + 1);
+      if (!outgoing.has(edge.from)) outgoing.set(edge.from, []);
+      outgoing.get(edge.from).push(edge);
+    }
+    const ordered = [],
+      depth = new Map(),
+      seen = new Set();
+    function visit(root, level = 0) {
+      if (!root || seen.has(root.id)) return;
+      const queue = [[root, level]];
+      for (let i = 0; i < queue.length; i++) {
+        const [n, d] = queue[i];
+        if (seen.has(n.id)) continue;
+        seen.add(n.id);
+        ordered.push(n);
+        depth.set(n.id, d);
+        for (const e of outgoing.get(n.id) || []) {
+          const target = byId.get(e.to);
+          if (target && !seen.has(target.id)) queue.push([target, d + 1]);
+        }
+      }
+    }
+    for (const n of graph.nodes.filter((n) => n.kind === "events")) visit(n);
+    for (const n of graph.nodes.filter((n) => !incoming.has(n.id))) visit(n);
+    for (const n of graph.nodes) visit(n);
+    const visible = ordered.slice(0, 12),
       ids = new Set(visible.map((n) => n.id));
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute(
-      "viewBox",
-      "0 0 440 " + (Math.ceil(visible.length / 2) * 100 + 20),
+    jsOverview.append(
+      make(
+        "p",
+        "javascript-reading-order",
+        "事件 → 處理函式 → 下游呼叫 → 畫面／資料變更；依已找到的靜態關係排列。",
+      ),
     );
+    const trace = make("details", "javascript-trace");
+    trace.append(make("summary", "", "依序閱讀關聯與未確認項目"));
+    for (const edge of graph.edges.filter(
+      (e) => ids.has(e.from) && ids.has(e.to),
+    )) {
+      const from = byId.get(edge.from),
+        to = byId.get(edge.to),
+        line = button(
+          from.title + " → " + to.title + " · " + edge.label,
+          "code",
+          () => {
+            window.PageWorkbench.openFlowSource(to);
+            focusNode(preview);
+          },
+        );
+      trace.append(line);
+    }
+    for (const n of visible.filter((n) => n.note))
+      trace.append(make("p", "muted", n.title + "：" + n.note));
+    jsOverview.append(trace);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 440 " + (visible.length * 90 + 20));
     svg.classList.add("javascript-mini-flow");
     svg.setAttribute("role", "img");
     svg.setAttribute("aria-label", "所選元素的 JavaScript 靜態關聯圖");
     const points = new Map(
       visible.map((n, i) => [
         n.id,
-        { x: 10 + (i % 2) * 220, y: 10 + Math.floor(i / 2) * 100 },
+        { x: 30 + Math.min(3, depth.get(n.id) || 0) * 28, y: 10 + i * 90 },
       ]),
     );
     for (const e of graph.edges) {
@@ -271,10 +336,19 @@
         path = document.createElementNS(svg.namespaceURI, "path");
       path.setAttribute(
         "d",
-        `M${a.x + 100},${a.y + 56} V${a.y + 76} H${b.x + 100} V${b.y}`,
+        `M${a.x + 200},${a.y + 28} H${400 + (graph.edges.indexOf(e) % 4) * 8} V${b.y + 28} H${b.x + 200}`,
       );
+      const edgeTitle = document.createElementNS(svg.namespaceURI, "title");
+      edgeTitle.textContent =
+        byId.get(e.from).title + " → " + byId.get(e.to).title + " · " + e.label;
+      path.append(edgeTitle);
+      path.setAttribute("marker-end", "url(#javascript-summary-arrow)");
       svg.append(path);
     }
+    const defs = document.createElementNS(svg.namespaceURI, "defs");
+    defs.innerHTML =
+      '<marker id="javascript-summary-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:#86b798;stroke:none"/></marker>';
+    svg.prepend(defs);
     for (const n of visible) {
       const p = points.get(n.id),
         g = document.createElementNS(svg.namespaceURI, "g"),
@@ -293,6 +367,20 @@
       title.textContent =
         n.title + " · " + n.file + (n.line ? ":" + n.line : "");
       g.append(rect, text, title);
+      g.setAttribute("role", "button");
+      g.setAttribute("tabindex", "0");
+      g.setAttribute("aria-label", "查看原始碼：" + title.textContent);
+      const open = () => {
+        window.PageWorkbench.openFlowSource(n);
+        focusNode(preview);
+      };
+      g.onclick = open;
+      g.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      };
       svg.append(g);
     }
     jsOverview.append(svg);
@@ -360,6 +448,129 @@
     });
     return d;
   }
+  const cssDialog = createDialog("CSS 結構與即時調整", "css-workspace-dialog");
+  const cssDialogBody = make("div", "css-workspace-body");
+  cssDialog.append(cssDialogBody);
+  cssDialogBody.append(inspectorPanel);
+  let cssCamera = null;
+  function openCSS() {
+    if (!window.PageWorkbench?.locatorContext()) return;
+    cssDialogBody.append(inspectorPanel);
+    if (!cssDialog.open) {
+      cssDialog.show();
+      cssCamera = { scale, tx, ty };
+    }
+    if (
+      !document.body.classList.contains("component-mode") &&
+      !document.body.classList.contains("canvas-list") &&
+      !matchMedia("(max-width:760px)").matches
+    ) {
+      const panelWidth = cssDialog.getBoundingClientRect().right + 24;
+      const available = canvas.clientWidth - panelWidth - 24;
+      if (available > 180) {
+        viewTouched = true;
+        scale = Math.max(0.2, Math.min(1, available / preview.el.offsetWidth));
+        tx = panelWidth - preview.el.offsetLeft * scale;
+        ty = 20 - preview.el.offsetTop * scale;
+        transform();
+      }
+    }
+  }
+  cssDialog.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      cssDialog.close();
+    }
+  });
+  cssDialog.addEventListener("close", () => {
+    if (cssCamera) {
+      ({ scale, tx, ty } = cssCamera);
+      cssCamera = null;
+      transform();
+    }
+    if (document.body.classList.contains("component-mode"))
+      detailInspector.append(inspectorPanel);
+  });
+  function refreshCSSSummary() {
+    cssSummary.replaceChildren();
+    const ctx = window.PageWorkbench?.locatorContext();
+    cssExpand.disabled = !ctx;
+    if (!ctx?.element) {
+      cssSummary.append(
+        make(
+          "p",
+          "muted",
+          "1 載入頁面 → 2 選取元素 → 3 展開 CSS 編輯 → 4 比較並匯出",
+        ),
+      );
+      return;
+    }
+    const c = ctx.element.ownerDocument.defaultView.getComputedStyle(
+      ctx.element,
+    );
+    cssSummary.append(
+      make(
+        "strong",
+        "",
+        ctx.node.tag + (ctx.node.attrs.id ? "#" + ctx.node.attrs.id : ""),
+      ),
+    );
+    const list = make("dl", "css-summary-values");
+    for (const key of [
+      "display",
+      "position",
+      "width",
+      "height",
+      "margin-top",
+      "padding-top",
+    ])
+      list.append(make("dt", "", key), make("dd", "", c.getPropertyValue(key)));
+    const state = window.CSSSession.state();
+    cssSummary.append(
+      list,
+      make(
+        "p",
+        "muted",
+        (state.comparing ? "正在顯示修改前 · " : "") +
+          state.count +
+          " 個元素已修改 · " +
+          state.message,
+      ),
+    );
+  }
+  window.addEventListener("analyzer:selection", refreshCSSSummary);
+  window.addEventListener("css-session:change", refreshCSSSummary);
+  window.addEventListener("analyzer:reveal-tree", () => {
+    folded[tree.el.id] = false;
+    tree.body.hidden = false;
+    const fold = tree.heading.querySelector(".node-fold");
+    if (fold) {
+      fold.textContent = "收合";
+      fold.setAttribute("aria-expanded", "true");
+    }
+    try {
+      localStorage.setItem("web-analyzer:card-folds", JSON.stringify(folded));
+    } catch {}
+    drawEdges();
+    if (document.body.classList.contains("component-mode")) closeComponent();
+    if (cssDialog.open) return;
+    if (
+      document.body.classList.contains("canvas-list") ||
+      matchMedia("(max-width:760px)").matches
+    ) {
+      tree.el.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    const rect = tree.el.getBoundingClientRect();
+    if (
+      rect.left < 0 ||
+      rect.top < 180 ||
+      rect.right > innerWidth - 40 ||
+      rect.bottom > innerHeight - 70
+    )
+      focusNode(tree);
+  });
   const manualDialog = createDialog("單頁原始碼分析", "manual-dialog");
   manualDialog.append($("#input-panel"));
   const mapDialog = createDialog("專案檔案地圖", "map-dialog");
@@ -510,6 +721,39 @@
   zoomTools.append(zoomOut, zoomLabel, zoomIn, fit, reset);
   canvas.append(zoomTools);
   const nodes = [source, pages, tree, inspector, preview, javascript];
+  let folded = {};
+  try {
+    folded = JSON.parse(
+      localStorage.getItem("web-analyzer:card-folds") || "{}",
+    );
+  } catch {}
+  for (const node of nodes) {
+    const fold = make("button", "node-fold", "收合");
+    fold.type = "button";
+    fold.setAttribute(
+      "aria-label",
+      "收合／展開" + node.heading.querySelector("h2").textContent,
+    );
+    function applyFold() {
+      node.body.hidden = !!folded[node.el.id];
+      fold.textContent = node.body.hidden ? "展開" : "收合";
+      fold.setAttribute("aria-expanded", String(!node.body.hidden));
+    }
+    applyFold();
+    fold.onclick = (e) => {
+      e.stopPropagation();
+      folded[node.el.id] = !folded[node.el.id];
+      applyFold();
+      try {
+        localStorage.setItem("web-analyzer:card-folds", JSON.stringify(folded));
+      } catch {}
+      reflow();
+      drawEdges();
+    };
+    fold.onpointerdown = (e) => e.stopPropagation();
+    node.heading.append(fold);
+  }
+
   const mainWireTools = make("div", "main-wire-tools");
   document.body.append(mainWireTools);
   // Reserve a separate toolbar row; wrapping must never cover the canvas caption or cards.
@@ -868,7 +1112,7 @@
     if (
       mainWires.draft ||
       e.target.closest(
-        ".node-resize-handle,.node-size-reset,.wire-handle,.wire-hit,.main-wire-tools",
+        ".node-resize-handle,.node-size-reset,.node-fold,.wire-handle,.wire-hit,.main-wire-tools",
       )
     )
       return;
@@ -1599,6 +1843,7 @@
   });
   flowTop.append(fitFunctions, flowAll, flowMore, restoreFunctions);
   async function openComponent(id) {
+    if (cssDialog.open) cssDialog.close();
     const selected = id
       ? window.PageWorkbench.selectComponent(id)
       : window.PageWorkbench.component();
@@ -1743,7 +1988,7 @@
     ++detailRequest;
     detail.hidden = true;
     document.body.classList.remove("component-mode");
-    inspector.body.prepend(inspectorPanel);
+    cssDialogBody.append(inspectorPanel);
     detailId = null;
     detailAnalysisId = null;
     detailSource = "";
@@ -1842,6 +2087,8 @@
       $("#project-title").textContent.replace(/ · 專案地圖$/, "") ||
       (ready ? $("#source-label").textContent : "尚未載入專案");
     jsOpen.disabled = !ready;
+    cssExpand.disabled = !ready;
+    if (!ready) refreshCSSSummary();
     if (!ready)
       jsOverview.replaceChildren(
         make("p", "muted", "先執行網頁預覽，再點選要解析的元素。"),

@@ -365,6 +365,8 @@ function renderTree() {
     (search ? visible.size + " / " : "") + report.nodes.length + " 個";
 }
 function selectNode(id) {
+  if (!nodeMap.has(id)) return;
+  $("#tree-search").value = "";
   if (selected !== id) jsScope = "element";
   selected = id;
   let node = nodeMap.get(id);
@@ -373,15 +375,29 @@ function selectNode(id) {
     node = nodeMap.get(node.parent);
   }
   renderTree();
-  const tree = $("#tree");
-  const active = tree.querySelector(".tree-item.selected");
-  if (active) {
-    const area = tree.getBoundingClientRect();
-    const row = active.getBoundingClientRect();
-    if (row.bottom > area.bottom)
-      tree.scrollTop += row.bottom - area.bottom + 8;
-    else if (row.top < area.top) tree.scrollTop -= area.top - row.top + 8;
-  }
+  requestAnimationFrame(() => {
+    const tree = $("#tree"),
+      active = tree.querySelector(".tree-item.selected");
+    if (!active) return;
+    for (
+      let container = active.parentElement;
+      container && container.id !== "flow-canvas";
+      container = container.parentElement
+    ) {
+      if (container.scrollHeight <= container.clientHeight + 1) continue;
+      const css = getComputedStyle(container);
+      if (!/(auto|scroll)/.test(css.overflowY)) continue;
+      const a = active.getBoundingClientRect(),
+        b = container.getBoundingClientRect();
+      const scale = b.height / container.offsetHeight || 1;
+      if (a.top < b.top || a.bottom > b.bottom)
+        container.scrollTop +=
+          (a.top - b.top - b.height / 2 + a.height / 2) / scale;
+    }
+    active.classList.remove("selection-arrived");
+    void active.offsetWidth;
+    active.classList.add("selection-arrived");
+  });
   markSelection();
   renderInspector();
   if (view === "source")
@@ -427,10 +443,19 @@ $("#preview").addEventListener("load", () => {
   style.textContent =
     "[data-analyzer-selected]{outline:3px solid #16834b!important;outline-offset:2px!important;box-shadow:0 0 0 5px #ffffffcc!important;}";
   doc.head.append(style);
+  window.CSSSession.attach(doc, report);
   doc.addEventListener("click", (event) => {
     event.preventDefault();
-    const target = event.target.closest("[data-web-analyzer-node]");
-    if (target) selectNode(target.dataset.webAnalyzerNode);
+    const interactive = event.target.closest(
+      'button,a,input,select,textarea,[role="button"]',
+    );
+    const target = interactive?.hasAttribute("data-web-analyzer-node")
+      ? interactive
+      : event.target.closest("[data-web-analyzer-node]");
+    if (target) {
+      selectNode(target.dataset.webAnalyzerNode);
+      window.dispatchEvent(new CustomEvent("analyzer:reveal-tree"));
+    }
   });
   doc.addEventListener("submit", (e) => e.preventDefault());
   markSelection();
@@ -1162,7 +1187,24 @@ new ResizeObserver(() => {
 }).observe($("#preview"));
 
 // Share the folder snapshot with the existing page workbench.
+window.addEventListener("css-session:change", (e) => {
+  if (
+    e.detail.kind !== "edit" &&
+    e.detail.kind !== "save" &&
+    report &&
+    inspectTab === "css"
+  )
+    renderInspector();
+});
 window.PageWorkbench = {
+  openFlowSource(node) {
+    if (!report) return;
+    const file = report.files.find(
+      (f) => f.label === node.file || f.id === node.file,
+    );
+    if (file) openSource(file.id, node.line || 1);
+    else status("此節點來源尚未取得，請在完整流程圖查看原始碼線索。");
+  },
   showSelectedSnippet() {
     return showNodeSource();
   },

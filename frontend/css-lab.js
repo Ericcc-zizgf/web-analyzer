@@ -220,7 +220,38 @@ window.CSSLab = (() => {
     "justify-self": "個別水平對齊",
     transform: "視覺變形",
   };
-  const structureOpen = new Map();
+  let savedSections = [];
+  try {
+    savedSections = JSON.parse(
+      localStorage.getItem("web-analyzer:css-sections") || "[]",
+    );
+  } catch {}
+  const structureOpen = new Map(
+    Array.isArray(savedSections)
+      ? savedSections.filter(
+          (x) =>
+            Array.isArray(x) &&
+            x.length === 2 &&
+            typeof x[0] === "string" &&
+            typeof x[1] === "boolean",
+        )
+      : [],
+  );
+  function saveSections() {
+    try {
+      localStorage.setItem(
+        "web-analyzer:css-sections",
+        JSON.stringify([...structureOpen]),
+      );
+    } catch {}
+  }
+  let changedOnly = false;
+  window.addEventListener("css-session:change", () => {
+    document
+      .querySelectorAll(".css-structure-heading")
+      .forEach((h) => h.dispatchEvent(new Event("sessionupdate")));
+  });
+
   function renderStructure(box, ctx) {
     const { element, win, node } = ctx,
       rows = [];
@@ -243,18 +274,95 @@ window.CSSLab = (() => {
       }
       toggleAll.textContent = open ? "全部收合" : "全部展開";
     });
-    heading.append(toggleAll);
+    const tools = make("div", undefined, "css-session-tools"),
+      session = window.CSSSession;
+    const undoButton = button("復原", () => session.undo()),
+      redoButton = button("重做", () => session.redo()),
+      compareButton = button("查看修改前", () => session.compare()),
+      exportButton = button("匯出修改 CSS", () => session.exportCSS()),
+      resetAll = button("還原全部", () => session.reset());
+    const only = make("input");
+    only.type = "checkbox";
+    only.checked = changedOnly;
+    const onlyLabel = make("label", "只看已修改項目");
+    onlyLabel.prepend(only);
+    const sessionStatus = make("p", "", "css-session-status");
+    sessionStatus.setAttribute("role", "status");
+    const changesPanel = section(
+        "修改紀錄與目前差異",
+        "css-change-history",
+        false,
+      ),
+      changesList = make("div");
+    changesPanel.append(changesList);
+    tools.append(
+      undoButton,
+      redoButton,
+      compareButton,
+      exportButton,
+      resetAll,
+      onlyLabel,
+    );
+    heading.append(tools, toggleAll, sessionStatus, changesPanel);
+    function refreshSession() {
+      const state = session.state();
+      undoButton.disabled = !state.undo || state.comparing;
+      redoButton.disabled = !state.redo || state.comparing;
+      compareButton.textContent = state.comparing ? "返回修改後" : "查看修改前";
+      compareButton.disabled = !state.count;
+      exportButton.disabled = !state.count;
+      resetAll.disabled = !state.count;
+      sessionStatus.textContent =
+        (state.comparing ? "正在查看修改前，編輯暫停。 " : "") + state.message;
+      changesList.replaceChildren();
+      for (const change of session.changes()) {
+        const group = make("div", undefined, "css-change-entry");
+        group.append(make("code", change.selector));
+        for (const item of change.properties)
+          group.append(
+            make("p", item.property + ": " + item.before + " → " + item.after),
+          );
+        changesList.append(group);
+      }
+      if (state.history.length) {
+        const recent = make("ol");
+        for (const item of state.history) recent.append(make("li", item));
+        changesList.append(make("p", "最近操作（最新在前）"), recent);
+      }
+      if (!state.count)
+        changesList.append(make("p", "尚未修改任何 CSS。", "muted"));
+      for (const row of rows) {
+        const base = make("div").style;
+        base.cssText = session.originalStyle(row.target) || "";
+        const edited = session.isModified(row.target, row.key);
+        row.row.hidden = changedOnly && !edited;
+        row.row.classList.toggle("is-modified", edited);
+        for (const c of row.row.querySelectorAll("input,select,button"))
+          c.disabled = state.comparing;
+      }
+    }
+    only.onchange = () => {
+      changedOnly = only.checked;
+      refreshSession();
+    };
+    heading.addEventListener("sessionupdate", () => {
+      update();
+      refreshSession();
+    });
     box.append(heading);
     function group(title, id, open) {
       const g = section(title, id, structureOpen.get(id) ?? open);
-      g.addEventListener("toggle", () => structureOpen.set(id, g.open));
+      g.addEventListener("toggle", () => {
+        structureOpen.set(id, g.open);
+        saveSections();
+      });
       groups.push(g);
       box.append(g);
       return g;
     }
     function declared(target, key) {
       const inline = target.style.getPropertyValue(key);
-      if (inline) return { value: inline, source: "預覽行內設定" };
+      if (inline) return { value: inline, source: "目前行內設定／預覽修改" };
       const all = candidates(target, ctx, key).filter(
         (x) => x.state === "條件符合",
       );
@@ -344,9 +452,45 @@ window.CSSLab = (() => {
         );
         const feedback = make("small", "", "css-parameter-feedback");
         feedback.setAttribute("aria-live", "polite");
+        const baselineStyle = make("div").style;
+        baselineStyle.cssText = session.originalStyle(target) || "";
+        const sourceCandidates = candidates(target, ctx, key).filter(
+          (c) => !c.inline && c.state === "條件符合",
+        );
+        sourceCandidates.sort(
+          (a, b) =>
+            Number(a.important) - Number(b.important) ||
+            compare(a.spec || [0, 0, 0, 0], b.spec || [0, 0, 0, 0]) ||
+            a.index - b.index,
+        );
+        const uncertain = sourceCandidates.some((c) => c.complex || !c.spec),
+          originalInline = baselineStyle.getPropertyValue(key);
+        const authoredCandidates = [...sourceCandidates];
+        if (originalInline)
+          authoredCandidates.push({
+            value: originalInline,
+            important: baselineStyle.getPropertyPriority(key) === "important",
+            spec: [1, 0, 0, 0],
+            index: Infinity,
+            selector: "來源行內 style",
+          });
+        authoredCandidates.sort(
+          (a, b) =>
+            Number(a.important) - Number(b.important) ||
+            compare(a.spec || [0, 0, 0, 0], b.spec || [0, 0, 0, 0]) ||
+            a.index - b.index,
+        );
+        const authored = !uncertain
+          ? authoredCandidates.at(-1)?.value || ""
+          : "";
         const source = make(
           "small",
-          "初始值依據：" + record.source,
+          "原始設定：" +
+            (authored || "未明確設定／規則需另判斷") +
+            " · " +
+            (originalInline
+              ? "來源行內 style"
+              : sourceCandidates.at(-1)?.selector || "繼承／瀏覽器預設"),
           "css-parameter-source",
         );
         function apply() {
@@ -363,7 +507,7 @@ window.CSSLab = (() => {
           }
           const id = target.dataset.webAnalyzerNode || "parent:" + node.id;
           const original = edits.get(id) || {
-            original: target.getAttribute("style"),
+            original: session.originalStyle(target),
             element: target,
           };
           target.style.setProperty(key, next, "important");
@@ -375,9 +519,181 @@ window.CSSLab = (() => {
         }
         value.oninput = apply;
         unit.onchange = apply;
+        let choiceSelect = null;
+        const enumValues = {
+          display: [
+            "block",
+            "inline",
+            "inline-block",
+            "flex",
+            "inline-flex",
+            "grid",
+            "inline-grid",
+            "none",
+          ],
+          position: ["static", "relative", "absolute", "fixed", "sticky"],
+          "box-sizing": ["content-box", "border-box"],
+          "flex-direction": ["row", "row-reverse", "column", "column-reverse"],
+          "flex-wrap": ["nowrap", "wrap", "wrap-reverse"],
+          "justify-content": [
+            "normal",
+            "flex-start",
+            "center",
+            "flex-end",
+            "space-between",
+            "space-around",
+            "space-evenly",
+          ],
+          "align-items": [
+            "normal",
+            "stretch",
+            "flex-start",
+            "center",
+            "flex-end",
+            "baseline",
+          ],
+          "align-self": [
+            "auto",
+            "stretch",
+            "flex-start",
+            "center",
+            "flex-end",
+            "baseline",
+          ],
+          "text-align": ["start", "end", "left", "right", "center", "justify"],
+          "overflow-x": ["visible", "hidden", "clip", "scroll", "auto"],
+          "overflow-y": ["visible", "hidden", "clip", "scroll", "auto"],
+          "border-style": ["none", "solid", "dashed", "dotted", "double"],
+          "grid-auto-flow": ["row", "column", "row dense", "column dense"],
+        };
+        const unitless = [
+          "flex-grow",
+          "flex-shrink",
+          "order",
+          "z-index",
+          "font-weight",
+          "grid-column",
+          "grid-row",
+        ];
+        const choice = enumValues[key];
+        const extras = make("div", undefined, "css-special-controls");
+        if (choice) {
+          const select = make("select");
+          choiceSelect = select;
+          select.setAttribute("aria-label", key + " 選項");
+          for (const v of [
+            ...choice,
+            "inherit",
+            "initial",
+            "unset",
+            "自訂語法",
+          ]) {
+            const o = make("option", v);
+            o.value = v;
+            select.append(o);
+          }
+          select.value = choice.includes(value.value)
+            ? value.value
+            : "自訂語法";
+          value.hidden = select.value !== "自訂語法";
+          unit.hidden = true;
+          unit.value = "";
+          select.onchange = () => {
+            value.hidden = select.value !== "自訂語法";
+            if (!value.hidden) {
+              value.focus();
+              return;
+            }
+            value.value = select.value;
+            apply();
+          };
+          extras.append(select);
+        } else if (
+          key === "color" ||
+          key === "background-color" ||
+          key === "border-color"
+        ) {
+          unit.hidden = true;
+          unit.value = "";
+          const color = make("input");
+          color.type = "color";
+          color.setAttribute("aria-label", key + " 色票");
+          const rgb = win
+            .getComputedStyle(target)
+            .getPropertyValue(key)
+            .match(/^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)$/);
+          if (rgb)
+            color.value =
+              "#" +
+              rgb
+                .slice(1)
+                .map((n) => Number(n).toString(16).padStart(2, "0"))
+                .join("");
+          color.oninput = () => {
+            value.value = color.value;
+            apply();
+          };
+          extras.append(color);
+        } else {
+          const numeric =
+            !!match &&
+            ![
+              "grid-column",
+              "grid-row",
+              "transform",
+              "grid-template-columns",
+              "grid-template-rows",
+            ].includes(key);
+          value.type = numeric ? "number" : "text";
+          if (numeric) {
+            value.step = "any";
+            value.inputMode = "decimal";
+          }
+          if (unitless.includes(key)) {
+            unit.hidden = true;
+            unit.value = "";
+          }
+          const syntax = button(numeric ? "改用完整語法" : "改用數值", () => {
+            if (value.type === "number") {
+              value.type = "text";
+              syntax.textContent = "改用數值";
+            } else {
+              const n = Number(value.value);
+              if (!Number.isFinite(n)) return;
+              value.type = "number";
+              value.step = "any";
+              syntax.textContent = "改用完整語法";
+            }
+          });
+          extras.append(syntax);
+          if (
+            ![
+              "grid-column",
+              "grid-row",
+              "transform",
+              "grid-template-columns",
+              "grid-template-rows",
+            ].includes(key)
+          )
+            for (const [caption, delta] of [
+              ["−", -1],
+              ["＋", 1],
+            ])
+              extras.append(
+                button(caption, () => {
+                  const n = Number(value.value);
+                  if (!Number.isFinite(n)) return;
+                  value.value = String(Math.round((n + delta) * 1000) / 1000);
+                  apply();
+                }),
+              );
+        }
         const restore = button("還原", () => {
           const id = target.dataset.webAnalyzerNode || "parent:" + node.id,
-            entry = edits.get(id);
+            entry = edits.get(id) || {
+              original: session.originalStyle(target),
+              element: target,
+            };
           if (entry) {
             const original = make("div").style;
             original.cssText = entry.original || "";
@@ -398,16 +714,25 @@ window.CSSLab = (() => {
               .match(
                 /^(-?(?:\d*\.)?\d+)(px|%|em|rem|vw|vh|vmin|vmax|ch|svh|dvh|fr|deg|ms|s)?$/,
               );
+          if (value.type === "number" && !m) value.type = "text";
           value.value = m ? m[1] : now;
+          if (choiceSelect) {
+            choiceSelect.value = Array.from(choiceSelect.options).some(
+              (o) => o.value === now,
+            )
+              ? now
+              : "自訂語法";
+            value.hidden = choiceSelect.value !== "自訂語法";
+          }
           unit.value = m ? m[2] || "" : "";
           feedback.textContent = "已還原此屬性";
           value.removeAttribute("aria-invalid");
           update();
         });
         controls.append(label, unit, restore);
-        row.append(controls, current, source, feedback);
+        row.append(controls, extras, source, current, feedback);
         container.append(row);
-        rows.push({ target, key, current });
+        rows.push({ target, key, current, row });
       }
     }
     fields(group("基本尺寸與盒模型", "css-basic-fields", true), element, [
@@ -559,7 +884,76 @@ window.CSSLab = (() => {
         "justify-self",
       ]);
     }
+    if (parent) {
+      const factors = make("div", undefined, "css-position-factors");
+      model.insertBefore(factors, explanation.nextSibling);
+      function showFactors() {
+        factors.replaceChildren();
+        const p = win.getComputedStyle(parent),
+          c = computed();
+        const keys = p.display.includes("flex")
+          ? [
+              "display",
+              "flex-direction",
+              "justify-content",
+              "align-items",
+              "row-gap",
+              "column-gap",
+            ]
+          : p.display.includes("grid")
+            ? [
+                "display",
+                "grid-template-columns",
+                "grid-template-rows",
+                "justify-items",
+                "align-items",
+                "row-gap",
+                "column-gap",
+              ]
+            : ["display", "width", "padding-top", "padding-left"];
+        const label = make("p", "優先檢查這些實際參數；點擊可跳到該欄位：");
+        factors.append(label);
+        for (const key of keys) {
+          const b = button(
+            "父層 " + key + ": " + p.getPropertyValue(key),
+            () => {
+              const row = rows.find(
+                (r) => r.target === parent && r.key === key,
+              );
+              if (!row) return;
+              for (
+                let a = row.row.parentElement;
+                a && a !== box;
+                a = a.parentElement
+              )
+                if (a.tagName === "DETAILS") a.open = true;
+              row.row.scrollIntoView({ block: "center", behavior: "smooth" });
+              row.row
+                .querySelector("input,select")
+                ?.focus({ preventScroll: true });
+            },
+          );
+          factors.append(b);
+        }
+        factors.append(
+          make(
+            "p",
+            "本元素 position: " +
+              c.position +
+              "；margin: " +
+              c.margin +
+              "；align-self: " +
+              c.alignSelf +
+              "。相對尺寸、transform、兄弟元素與可用空間也可能共同影響結果。",
+            "muted",
+          ),
+        );
+      }
+      showFactors();
+      heading.addEventListener("sessionupdate", showFactors);
+    }
     explain();
+    refreshSession();
   }
   function render(box, ctx) {
     const { element, win, node, refresh } = ctx;
@@ -837,122 +1231,8 @@ window.CSSLab = (() => {
     }
     select.onchange = draw;
     draw();
-
-    const editor = section("進階 CSS 宣告與還原全部", "css-editor", false);
-    const note = make(
-      "p",
-      "輸入 CSS 宣告後套用，直接觀察預覽與尺寸變化。原始 HTML、來源檔與分析 JSON 保留原內容。",
-      "muted",
-    );
-    const textarea = make("textarea");
-    textarea.id = "css-draft";
-    textarea.spellcheck = false;
-    textarea.setAttribute("aria-label", "練習 CSS 宣告");
-    textarea.placeholder = "height: 100vh;\ndisplay: flex;\npadding: 24px;";
-    textarea.value = drafts.get(node.id) ?? edits.get(node.id)?.draft ?? "";
-    textarea.oninput = () => drafts.set(node.id, textarea.value);
-    const feedback = make("p", "", "muted");
-    feedback.id = "css-edit-status";
-    feedback.setAttribute("role", "status");
-    const actions = make("div", undefined, "node-buttons");
-    const apply = button(
-      "套用到預覽",
-      () => {
-        const draft = textarea.value.trim();
-        const style = document.createElement("div").style;
-        style.cssText = draft;
-        if (draft && !style.length) {
-          feedback.textContent =
-            "沒有可套用的有效 CSS。請使用「屬性: 值;」，不要包含選擇器或大括號。";
-          return;
-        }
-        if (/[{}]/.test(draft) || /url\s*\(|@import/i.test(draft)) {
-          feedback.textContent =
-            "此練習區只接受一般 CSS 宣告，不接受規則區塊或外部資源。";
-          return;
-        }
-        const old = edits.get(node.id) || {
-          original: element.getAttribute("style"),
-          element,
-        };
-        element.removeAttribute("style");
-        if (old.original !== null) element.setAttribute("style", old.original);
-        for (let i = 0; i < style.length; i++) {
-          const key = style[i];
-          element.style.setProperty(
-            key,
-            style.getPropertyValue(key),
-            style.getPropertyPriority(key),
-          );
-        }
-        edits.set(node.id, { ...old, draft });
-        refresh();
-      },
-      "css-apply",
-    );
-    apply.className = "primary";
-    const restore = (entry) => {
-      if (entry.original === null) entry.element.removeAttribute("style");
-      else entry.element.setAttribute("style", entry.original);
-    };
-    const reset = button(
-      "還原此元素",
-      () => {
-        const e = edits.get(node.id);
-        if (e) restore(e);
-        edits.delete(node.id);
-        drafts.delete(node.id);
-        refresh();
-      },
-      "css-reset",
-    );
-    reset.disabled = !edits.has(node.id);
-    const all = button(
-      "還原全部",
-      () => {
-        for (const e of edits.values()) restore(e);
-        edits.clear();
-        drafts.clear();
-        refresh();
-      },
-      "css-reset-all",
-    );
-    all.disabled = !edits.size;
-    actions.append(apply, reset, all);
-    editor.append(note, textarea, actions, feedback);
-    if (edits.has(node.id))
-      editor.append(
-        make(
-          "p",
-          "已套用練習樣式。有效宣告：" +
-            element.style.cssText +
-            "（無效宣告會被瀏覽器忽略）",
-          "info-box",
-        ),
-      );
-    if (edits.size)
-      editor.append(
-        make(
-          "p",
-          "目前有 " + edits.size + " 個元素經過修改；重新分析會清除練習修改。",
-          "muted",
-        ),
-      );
-    box.append(editor);
-    window.TeachingGuide?.renderCSS(box, ctx, {
-      apply(key, value) {
-        const draft = document.createElement("div").style;
-        draft.cssText = textarea.value;
-        draft.setProperty(key, value);
-        textarea.value = draft.cssText;
-        textarea.oninput();
-        apply.click();
-      },
-      reset() {
-        reset.click();
-      },
-    });
   }
+
   return {
     render,
     reset: () => {

@@ -2248,3 +2248,7 @@ body.component-mode .canvas-metrics {
 .canvas-list .main-wire-tools, .canvas-list .wire-edit-layer, body.component-mode .main-wire-tools { display:none; }
 .component-flow-edge-hit { pointer-events:none; }
 @media(max-width:760px) { .main-wire-tools, .flow-world > .wire-edit-layer { display:none; } }
+
+.wire-handle-end { width:10px; height:10px; border-color:#8fba9c; background:#1c2d23; }
+.wire-handle-end.is-selected { width:12px; height:12px; border-color:#d4f7de; background:#477e55; }
+.wire-toolbar button:disabled { opacity:.45; cursor:default; }

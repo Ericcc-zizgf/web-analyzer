@@ -109,9 +109,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     await page.goto(url);
     await page.locator(".wire-hit").first().waitFor();
     assert.equal(
-      await page.locator(".wire-handle").count(),
-      0,
-      "no control-point clutter before selection",
+      await page.locator(world + " .wire-handle-end").count(),
+      8,
+      "all four wires keep both endpoints visible",
     );
     assert.equal(
       await page.locator(".wire-toolbar select").count(),
@@ -121,9 +121,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     const p = await linePoint(".flow-edges path");
     await clickPoint(world, p);
     assert.equal(
-      await page.locator(world + " .wire-handle").count(),
+      await page.locator(world + " .wire-handle.is-selected").count(),
       2,
-      "only endpoints on selected wire",
+      "only selected wire endpoints are highlighted",
     );
     await clickPoint(world, p, 2);
     await page.locator(world + " .wire-handle-joint").waitFor();
@@ -163,6 +163,30 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
         document.querySelectorAll(".flow-world .wire-handle-joint").length ===
         2,
     );
+    // Explicit exit must cancel the draft, clear selection, and retain every port.
+    await page
+      .getByRole("button", { name: "逐點重畫", exact: true })
+      .first()
+      .click();
+    await clickPoint(world, { x: 360, y: 120 });
+    await page
+      .getByRole("button", { name: "離開畫線模式", exact: true })
+      .first()
+      .click();
+    assert.deepEqual((await state()).routes, saved.routes);
+    assert.equal(
+      await page
+        .locator(world)
+        .evaluate((el) => el.classList.contains("is-wiring")),
+      false,
+    );
+    assert.equal(await page.locator(world + " .wire-handle-joint").count(), 0);
+    assert.equal(await page.locator(world + " .wire-handle-end").count(), 8);
+    await page
+      .locator(world + " .wire-hit")
+      .first()
+      .focus();
+    await page.keyboard.press("Enter");
     // Cancellation must not overwrite the saved route.
     await page
       .getByRole("button", { name: "逐點重畫", exact: true })
@@ -171,14 +195,19 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     await clickPoint(world, { x: 200, y: 120 });
     await page.keyboard.press("Escape");
     assert.deepEqual((await state()).routes, saved.routes);
-    await drag(page.locator(world + ' .wire-handle[data-end="from"]'), 0, 23);
+    await drag(
+      page.locator(world + ' .wire-handle.is-selected[data-end="from"]'),
+      0,
+      23,
+    );
     await page.reload();
     await page.locator(".wire-hit").first().waitFor();
     assert.deepEqual(
       (await state()).routes[id].waypoints,
       saved.routes[id].waypoints,
     );
-    assert.equal(await page.locator(".wire-handle").count(), 0);
+    assert.equal(await page.locator(world + " .wire-handle-end").count(), 8);
+    assert.equal(await page.locator(".wire-handle-joint").count(), 0);
     const actual = await page
       .locator(".flow-edges path")
       .first()
@@ -195,7 +224,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     await inject();
     const fw = ".component-flow-world",
       ft = ".component-flow-top";
-    assert.equal(await page.locator(fw + " .wire-handle").count(), 0);
+    assert.equal(await page.locator(fw + " .wire-handle-end").count(), 2);
     await page.locator(fw + " .wire-hit").focus();
     await page.keyboard.press("Enter");
     await page
@@ -276,7 +305,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     assert.equal(await page.locator(main).isVisible(), false);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS browser: direct line selection, no idle handles, explicit add/delete/drag joints, point-to-point wiring, cancel, grid snap at zoom, reload, function evidence/isolation, v1 migration and denied storage",
+      "PASS browser: direct line selection, persistent endpoints, explicit exit, explicit add/delete/drag joints, point-to-point wiring, cancel, grid snap at zoom, reload, function evidence/isolation, v1 migration and denied storage",
     );
   } finally {
     await browser.close();

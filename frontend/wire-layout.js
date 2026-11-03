@@ -187,6 +187,16 @@
       this.label = document.createElement("span");
       this.label.className = "wire-selection-label";
       this.controls.append(this.label);
+      this.exitButton = button("離開畫線模式", () => {
+        const hadDraft = !!this.draft;
+        this.draft = null;
+        this.preview = null;
+        this.selected = null;
+        this.sync(this.connections);
+        this.status.textContent = hadDraft
+          ? "已離開畫線模式，未完成的草稿已取消"
+          : "已離開畫線模式";
+      });
       this.drawButton = button("逐點重畫", () => this.startDrawing());
       this.finishButton = button("完成接線", () => this.finishDrawing());
       this.cancelButton = button("取消", () => {
@@ -359,6 +369,7 @@
       if (!this.layer.isConnected) this.world.append(this.layer);
       const selected = connections.find((c) => c.id === this.selected);
       this.label.textContent = selected ? selected.label : "點擊連線以調整";
+      this.exitButton.disabled = !selected && !this.draft;
       this.evidence.hidden = !selected?.evidence || !!this.draft;
       for (const b of [this.drawButton, this.reset])
         b.hidden = !selected || !!this.draft;
@@ -414,10 +425,11 @@
         hit.classList.toggle("is-selected", c.id === this.selected);
         hit.setAttribute("aria-label", "選取連線：" + c.label);
         hit.dataset.edge = c.id;
-        if (c.id !== this.selected) continue;
         const values = [
           ["from", g.from],
-          ...g.waypoints.map((p, i) => ["point-" + i, p]),
+          ...(c.id === this.selected
+            ? g.waypoints.map((p, i) => ["point-" + i, p])
+            : []),
           ["to", g.to],
         ];
         for (const [end, p] of values) {
@@ -440,6 +452,7 @@
             this.handles.set(key, h);
             this.bind(h, c.id, end);
           }
+          h.classList.toggle("is-selected", c.id === this.selected);
           h.style.left = p.x + "px";
           h.style.top = p.y + "px";
           h.setAttribute(
@@ -477,9 +490,10 @@
         e.preventDefault();
         e.stopPropagation();
         if (this.draft) {
-          if (end === "to") this.finishDrawing();
+          if (id === this.selected && end === "to") this.finishDrawing();
           return;
         }
+        this.select(id);
         handle.setPointerCapture(e.pointerId);
         let moved = false;
         handle.onpointermove = (ev) => {
@@ -491,13 +505,17 @@
           if (moved) this.save();
         };
       };
-      handle.onclick = (e) => e.stopPropagation();
+      handle.onclick = (e) => {
+        e.stopPropagation();
+        if (!this.draft) this.select(id);
+      };
       handle.onkeydown = (e) => {
         if (e.key === "Escape") {
           this.deselect();
           return;
         }
         if (["Delete", "Backspace"].includes(e.key)) {
+          this.select(id);
           e.preventDefault();
           e.stopPropagation();
           if (end.startsWith("point-"))

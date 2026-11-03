@@ -79,7 +79,7 @@
   const hint = make(
     "p",
     "canvas-hint",
-    "拖曳標題移動 · Ctrl / ⌘ + 滾輪縮放 ·「調整連線」自動儲存",
+    "點線選取 · 雙擊線加轉折 · 逐點接線 · 20 px 格點自動對齊",
   );
   canvas.append(hint);
   main.prepend(canvas);
@@ -355,6 +355,7 @@
           id,
           a,
           b,
+          path: paths[i],
           label:
             from.heading.querySelector("h2").textContent +
             " → " +
@@ -729,8 +730,9 @@
     )
       return;
     if (
+      mainWires.draft ||
       e.target.closest(
-        ".node-resize-handle,.node-size-reset,.wire-handle,.main-wire-tools",
+        ".node-resize-handle,.node-size-reset,.wire-handle,.wire-hit,.main-wire-tools",
       )
     )
       return;
@@ -1368,6 +1370,8 @@
           a: box(a),
           b: box(b),
           self: edge.from === edge.to,
+          path,
+          evidence: () => openFlowEvidence(edge, complete),
           label:
             mapTitle(edge.from) +
             " → " +
@@ -1395,18 +1399,18 @@
         hit.setAttribute("role", "button");
         hit.setAttribute(
           "aria-label",
-          "查看連線依據：" +
+          "選取連線：" +
             mapTitle(edge.from) +
             " → " +
             mapTitle(edge.to) +
             " · " +
             edge.label,
         );
-        hit.onclick = () => openFlowEvidence(edge, complete);
+        hit.onclick = () => functionWires.select(id);
         hit.onkeydown = (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            openFlowEvidence(edge, complete);
+            functionWires.select(id);
           }
         };
         function mapTitle(id) {

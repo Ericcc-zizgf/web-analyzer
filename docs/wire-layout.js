@@ -1,9 +1,13 @@
-/* Editable visual routes. Analysis relationships and evidence are never changed. */
+/* Grid-based visual wiring; source relationships are kept intact. */
 (function (scope) {
   "use strict";
-  const PREFIX = "web-analyzer:layout:v1:";
+  const PREFIX = "web-analyzer:layout:v1:",
+    GRID = 20;
   const finite = (n) => Number.isFinite(n) && Math.abs(n) <= 1000000;
   const point = (p) => p && finite(p.x) && finite(p.y);
+  const snap = (n) => Math.max(0, Math.round(n / GRID) * GRID);
+  const snapped = (p) => ({ x: snap(p.x), y: snap(p.y) });
+  const same = (a, b) => a.x === b.x && a.y === b.y;
   const clamp = (n) => Math.max(0, Math.min(1, n));
   function hash(text) {
     let h = 2166136261;
@@ -11,141 +15,232 @@
       h = Math.imul(h ^ text.charCodeAt(i), 16777619);
     return (h >>> 0).toString(36);
   }
+  function empty() {
+    return { version: 2, nodes: {}, routes: {} };
+  }
   function load(storage, key) {
+    const state = empty();
     try {
       const raw = JSON.parse(storage.getItem(PREFIX + key));
-      if (raw?.version !== 1) return { version: 1, nodes: {}, routes: {} };
-      const nodes = {},
-        routes = {};
+      if (![1, 2].includes(raw?.version)) return state;
       for (const [id, p] of Object.entries(raw.nodes || {}))
-        if (point(p)) nodes[id] = { x: p.x, y: p.y };
+        if (point(p)) state.nodes[id] = { x: p.x, y: p.y };
       for (const [id, r] of Object.entries(raw.routes || {})) {
         if (!r || typeof r !== "object") continue;
-        const route = {
-          style: r.style === "orthogonal" ? "orthogonal" : "curve",
-        };
+        const next = { waypoints: [] };
         for (const end of ["from", "to"])
           if (
             r[end] &&
             ["left", "right", "top", "bottom"].includes(r[end].side) &&
             finite(r[end].t)
           )
-            route[end] = { side: r[end].side, t: clamp(r[end].t) };
-        if (point(r.via)) route.via = { x: r.via.x, y: r.via.y };
-        routes[id] = route;
+            next[end] = { side: r[end].side, t: clamp(r[end].t) };
+        // v1's automatic midpoint is intentionally discarded: only user-created joints remain.
+        if (raw.version === 2 && Array.isArray(r.waypoints))
+          next.waypoints = r.waypoints.filter(point).slice(0, 200).map(snapped);
+        state.routes[id] = next;
       }
-      return { version: 1, nodes, routes };
-    } catch {
-      return { version: 1, nodes: {}, routes: {} };
-    }
+    } catch {}
+    return state;
+  }
+  function sides(a, b, self) {
+    if (self) return ["right", "top"];
+    if (b.x >= a.x + a.width) return ["right", "left"];
+    if (a.x >= b.x + b.width) return ["left", "right"];
+    return b.y >= a.y ? ["bottom", "top"] : ["top", "bottom"];
   }
   function anchor(box, value, side) {
-    const a = value || { side, t: Math.min(0.9, 25 / box.height) };
-    const horizontal = a.side === "top" || a.side === "bottom";
+    const v = value || { side, t: 0.5 },
+      horizontal = ["top", "bottom"].includes(v.side);
+    const along = (start, size) =>
+      Math.max(
+        Math.ceil(start / GRID) * GRID,
+        Math.min(
+          Math.floor((start + size) / GRID) * GRID,
+          snap(start + size * v.t),
+        ),
+      );
     return {
-      x:
-        box.x +
-        (horizontal ? box.width * a.t : a.side === "right" ? box.width : 0),
-      y:
-        box.y +
-        (horizontal
-          ? a.side === "bottom"
-            ? box.height
-            : 0
-          : box.height * a.t),
-      dx: a.side === "right" ? 1 : a.side === "left" ? -1 : 0,
-      dy: a.side === "bottom" ? 1 : a.side === "top" ? -1 : 0,
+      x: horizontal
+        ? along(box.x, box.width)
+        : v.side === "right"
+          ? Math.ceil((box.x + box.width) / GRID) * GRID
+          : Math.floor(box.x / GRID) * GRID,
+      y: horizontal
+        ? v.side === "bottom"
+          ? Math.ceil((box.y + box.height) / GRID) * GRID
+          : Math.floor(box.y / GRID) * GRID
+        : along(box.y, box.height),
+      dx: v.side === "right" ? 1 : v.side === "left" ? -1 : 0,
+      dy: v.side === "bottom" ? 1 : v.side === "top" ? -1 : 0,
     };
   }
   function nearest(box, p) {
-    const x = clamp((p.x - box.x) / box.width),
-      y = clamp((p.y - box.y) / box.height);
-    return [
-      { side: "left", t: y, d: Math.abs(p.x - box.x) },
-      { side: "right", t: y, d: Math.abs(p.x - box.x - box.width) },
-      { side: "top", t: x, d: Math.abs(p.y - box.y) },
-      { side: "bottom", t: x, d: Math.abs(p.y - box.y - box.height) },
-    ]
-      .sort((a, b) => a.d - b.d)
-      .map(({ side, t }) => ({ side, t }))[0];
+    const side = [
+      ["left", Math.abs(p.x - box.x)],
+      ["right", Math.abs(p.x - box.x - box.width)],
+      ["top", Math.abs(p.y - box.y)],
+      ["bottom", Math.abs(p.y - box.y - box.height)],
+    ].sort((a, b) => a[1] - b[1])[0][0];
+    return {
+      side,
+      t: clamp(
+        ["top", "bottom"].includes(side)
+          ? (snap(p.x) - box.x) / box.width
+          : (snap(p.y) - box.y) / box.height,
+      ),
+    };
   }
   function route(aBox, bBox, saved = {}, self = false) {
-    const a = anchor(aBox, saved.from, "right"),
-      b = anchor(bBox, saved.to, "left");
-    const via = saved.via || {
-      x: (a.x + b.x) / 2,
-      y: self ? Math.max(12, aBox.y - 45) : (a.y + b.y) / 2,
+    const defaults = sides(aBox, bBox, self),
+      a = anchor(aBox, saved.from, defaults[0]),
+      b = anchor(bBox, saved.to, defaults[1]);
+    const waypoints = (saved.waypoints || []).map(snapped),
+      points = [{ x: a.x, y: a.y }],
+      segments = [];
+    const push = (p, leg) => {
+      const last = points.at(-1);
+      if (!same(last, p)) {
+        segments.push({ a: last, b: p, leg });
+        points.push(p);
+      }
     };
-    let d;
-    if (saved.style === "orthogonal") {
-      const out = { x: a.x + a.dx * 28, y: a.y + a.dy * 28 },
-        end = { x: b.x + b.dx * 28, y: b.y + b.dy * 28 };
-      d = `M${a.x},${a.y} L${out.x},${out.y} L${via.x},${out.y} L${via.x},${via.y} L${end.x},${via.y} L${end.x},${end.y} L${b.x},${b.y}`;
-    } else {
-      const bend = Math.max(
-        35,
-        Math.min(120, Math.hypot(b.x - a.x, b.y - a.y) / 3),
-      );
-      const tangent = a.x <= b.x ? 1 : -1;
-      d = `M${a.x},${a.y} C${a.x + a.dx * bend},${a.y + a.dy * bend} ${via.x - (tangent * bend) / 2},${via.y} ${via.x},${via.y} C${via.x + (tangent * bend) / 2},${via.y} ${b.x + b.dx * bend},${b.y + b.dy * bend} ${b.x},${b.y}`;
+    const stops = [...waypoints, b];
+    for (let i = 0; i < stops.length; i++) {
+      const start = points.at(-1),
+        end = stops[i];
+      if (start.x !== end.x && start.y !== end.y) {
+        if (!waypoints.length) {
+          if (self) {
+            const right = snap(aBox.x + aBox.width) + GRID * 2,
+              top = Math.max(0, Math.floor(aBox.y / GRID) * GRID - GRID * 2);
+            push({ x: right, y: start.y }, i);
+            push({ x: right, y: top }, i);
+            push({ x: end.x, y: top }, i);
+          } else if (a.dx && b.dx) {
+            const x = snap((a.x + b.x) / 2);
+            push({ x, y: start.y }, i);
+            push({ x, y: end.y }, i);
+          } else if (a.dy && b.dy) {
+            const y = snap((a.y + b.y) / 2);
+            push({ x: start.x, y }, i);
+            push({ x: end.x, y }, i);
+          } else
+            push(a.dx ? { x: end.x, y: start.y } : { x: start.x, y: end.y }, i);
+        } else {
+          // The last leg enters the destination perpendicular to its side.
+          const horizontal =
+            i === stops.length - 1
+              ? !!b.dy
+              : i === 0
+                ? !!a.dx
+                : segments.at(-1)?.a.y === start.y;
+          push(
+            horizontal ? { x: end.x, y: start.y } : { x: start.x, y: end.y },
+            i,
+          );
+        }
+      }
+      push({ x: end.x, y: end.y }, i);
     }
-    return { d, from: a, to: b, via };
+    return {
+      d: points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" "),
+      from: a,
+      to: b,
+      points,
+      segments,
+      waypoints,
+    };
+  }
+  function distance(p, segment) {
+    const a = segment.a,
+      b = segment.b,
+      x = Math.max(Math.min(a.x, b.x), Math.min(Math.max(a.x, b.x), p.x)),
+      y = Math.max(Math.min(a.y, b.y), Math.min(Math.max(a.y, b.y), p.y));
+    return Math.hypot(p.x - x, p.y - y);
   }
   class Editor {
     constructor(world, toolbar, key, redraw) {
       this.world = world;
       this.redraw = redraw;
-      this.editing = false;
       this.connections = [];
+      this.handles = new Map();
       this.layer = document.createElement("div");
       this.layer.className = "wire-edit-layer";
+      this.hitSvg = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg",
+      );
+      this.hitSvg.classList.add("wire-hit-layer");
+      this.layer.append(this.hitSvg);
+      this.hits = new Map();
       this.controls = document.createElement("div");
       this.controls.className = "wire-toolbar";
-      this.toggle = document.createElement("button");
-      this.toggle.type = "button";
-      this.toggle.textContent = "調整連線";
-      this.toggle.setAttribute("aria-pressed", "false");
-      this.select = document.createElement("select");
-      this.select.setAttribute("aria-label", "選擇要調整的連線");
-      this.style = document.createElement("select");
-      this.style.setAttribute("aria-label", "所選連線的線型");
-      this.style.innerHTML =
-        '<option value="curve">曲線</option><option value="orthogonal">直角線</option>';
-      this.reset = document.createElement("button");
-      this.reset.type = "button";
-      this.reset.textContent = "還原這條線";
+      const button = (text, fn) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = text;
+        b.onclick = fn;
+        this.controls.append(b);
+        return b;
+      };
+      this.label = document.createElement("span");
+      this.label.className = "wire-selection-label";
+      this.controls.append(this.label);
+      this.drawButton = button("逐點重畫", () => this.startDrawing());
+      this.finishButton = button("完成接線", () => this.finishDrawing());
+      this.cancelButton = button("取消", () => {
+        this.draft = null;
+        this.redraw();
+      });
+      this.evidence = button("查看程式碼依據", () =>
+        this.connections.find((c) => c.id === this.selected)?.evidence?.(),
+      );
+      this.reset = button("還原這條線", () => {
+        delete this.state.routes[this.selected];
+        this.draft = null;
+        this.save();
+        this.redraw();
+      });
       this.status = document.createElement("span");
       this.status.className = "wire-save-status";
       this.status.setAttribute("role", "status");
-      this.controls.append(
-        this.toggle,
-        this.select,
-        this.style,
-        this.reset,
-        this.status,
-      );
+      this.controls.append(this.status);
       toolbar.append(this.controls);
-      this.toggle.onclick = () => {
-        this.editing = !this.editing;
-        this.toggle.setAttribute("aria-pressed", String(this.editing));
-        this.sync(this.connections);
-      };
-      this.select.onchange = () => {
-        this.selected = this.select.value;
-        this.sync(this.connections);
-      };
-      this.style.onchange = () => {
-        if (!this.selected) return;
-        this.record(this.selected).style = this.style.value;
-        this.save();
-        this.redraw();
-      };
-      this.reset.onclick = () => {
-        delete this.state.routes[this.selected];
-        this.save();
-        this.redraw();
-      };
       this.setScope(key);
+      world.addEventListener("click", (e) => {
+        if (e.target.closest("button,input,select,textarea,a,.wire-hit"))
+          return;
+        if (this.draft) {
+          e.stopPropagation();
+          this.addDraft(this.coordinates(e));
+        } else if (!e.target.closest(".flow-node,.component-flow-node"))
+          this.deselect();
+      });
+      world.addEventListener("pointermove", (e) => {
+        if (this.draft) {
+          this.preview = this.coordinates(e);
+          this.redraw();
+        }
+      });
+      world.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (this.draft) {
+            this.draft = null;
+            this.redraw();
+          } else this.deselect();
+        }
+        if (e.key === "Enter" && this.draft) {
+          e.preventDefault();
+          this.finishDrawing();
+        }
+        if ((e.key === "Backspace" || e.key === "Delete") && this.draft) {
+          e.preventDefault();
+          this.draft.waypoints.pop();
+          this.redraw();
+        }
+      });
     }
     setScope(key) {
       this.key = key;
@@ -155,10 +250,11 @@
       } catch {}
       this.state = load(storage, key);
       this.selected = null;
-      this.status.textContent = "配置儲存在此瀏覽器";
+      this.draft = null;
+      this.status.textContent = "點線選取 · 雙擊線新增轉折 · 20 px 格點";
     }
     record(id) {
-      return (this.state.routes[id] ||= { style: "curve" });
+      return (this.state.routes[id] ||= { waypoints: [] });
     }
     save() {
       try {
@@ -176,104 +272,237 @@
       this.save();
     }
     clear() {
-      this.state = { version: 1, nodes: {}, routes: {} };
+      this.state = empty();
+      this.draft = null;
+      this.selected = null;
+      this.save();
+      this.redraw();
+    }
+    coordinates(e) {
+      const r = this.world.getBoundingClientRect(),
+        s = r.width / this.world.offsetWidth;
+      return snapped({
+        x: (e.clientX - r.left) / s,
+        y: (e.clientY - r.top) / s,
+      });
+    }
+    select(id) {
+      if (this.draft && this.selected !== id) this.draft = null;
+      this.selected = id;
+      this.sync(this.connections);
+    }
+    deselect() {
+      if (!this.selected) return;
+      this.selected = null;
+      this.draft = null;
+      this.sync(this.connections);
+    }
+    addDraft(p) {
+      if (!this.draft) return;
+      const pts = this.draft.waypoints;
+      if (pts.length < 200 && (!pts.length || !same(pts.at(-1), p)))
+        pts.push(p);
+      this.preview = null;
+      this.redraw();
+    }
+    startDrawing() {
+      if (!this.selected) return;
+      this.draft = { ...this.record(this.selected), waypoints: [] };
+      this.preview = null;
+      this.world.tabIndex = -1;
+      this.world.focus({ preventScroll: true });
+      this.redraw();
+    }
+    finishDrawing() {
+      if (!this.draft) return;
+      this.state.routes[this.selected] = {
+        ...this.draft,
+        waypoints: this.draft.waypoints.map(snapped),
+      };
+      this.draft = null;
+      this.preview = null;
+      this.save();
+      this.redraw();
+    }
+    geometry(c) {
+      const state =
+        this.draft && c.id === this.selected
+          ? {
+              ...this.draft,
+              waypoints: [
+                ...this.draft.waypoints,
+                ...(this.preview ? [this.preview] : []),
+              ],
+            }
+          : this.state.routes[c.id];
+      return route(c.a, c.b, state, c.self);
+    }
+    addWaypoint(c, p) {
+      const r = this.record(c.id),
+        g = route(c.a, c.b, r, c.self),
+        segment = [...g.segments].sort(
+          (a, b) => distance(p, a) - distance(p, b),
+        )[0];
+      if (!segment) return;
+      if (r.waypoints.some((w) => same(w, p))) return;
+      r.waypoints.splice(segment.leg, 0, snapped(p));
+      this.selected = c.id;
       this.save();
       this.redraw();
     }
     sync(connections) {
       this.connections = connections;
-      if (!connections.some((c) => c.id === this.selected))
-        this.selected = connections[0]?.id;
-      const signature = JSON.stringify(connections.map((c) => [c.id, c.label]));
-      if (this.signature !== signature) {
-        this.select.replaceChildren(
-          ...connections.map((c) => {
-            const o = document.createElement("option");
-            o.value = c.id;
-            o.textContent = c.label;
-            return o;
-          }),
-        );
-        this.signature = signature;
+      if (!connections.some((c) => c.id === this.selected)) {
+        this.selected = null;
+        this.draft = null;
       }
-      this.select.value = this.selected || "";
-      this.style.value = this.state.routes[this.selected]?.style || "curve";
-      for (const control of [this.select, this.style, this.reset])
-        control.hidden = !this.editing;
-      this.toggle.disabled = !connections.length;
-      this.layer.hidden = !this.editing;
       if (!this.layer.isConnected) this.world.append(this.layer);
-      const wanted = new Set();
+      const selected = connections.find((c) => c.id === this.selected);
+      this.label.textContent = selected ? selected.label : "點擊連線以調整";
+      this.evidence.hidden = !selected?.evidence || !!this.draft;
+      for (const b of [this.drawButton, this.reset])
+        b.hidden = !selected || !!this.draft;
+      for (const b of [this.finishButton, this.cancelButton])
+        b.hidden = !this.draft;
+      if (this.draft)
+        this.status.textContent =
+          "點格點逐點接線 · 點終點或 Enter 完成 · Esc 取消";
+      if (!this.draft && this.status.textContent.startsWith("點格點"))
+        this.status.textContent = "點線選取 · 雙擊線新增轉折 · 20 px 格點";
+      this.world.classList.toggle("is-wiring", !!this.draft);
+      const wantedHits = new Set(),
+        wantedHandles = new Set();
       for (const c of connections) {
-        const geometry = route(c.a, c.b, this.state.routes[c.id], c.self);
-        for (const end of ["from", "via", "to"]) {
-          if (end !== "via" && c.id !== this.selected) continue;
+        wantedHits.add(c.id);
+        let hit = this.hits.get(c.id);
+        if (!hit) {
+          hit = document.createElementNS(this.hitSvg.namespaceURI, "path");
+          hit.classList.add("wire-hit");
+          hit.setAttribute("tabindex", "0");
+          hit.setAttribute("role", "button");
+          hit.onclick = (e) => {
+            e.stopPropagation();
+            if (this.draft) this.addDraft(this.coordinates(e));
+            else this.select(c.id);
+          };
+          hit.ondblclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!this.draft)
+              this.addWaypoint(
+                this.connections.find((x) => x.id === c.id),
+                this.coordinates(e),
+              );
+          };
+          hit.onkeydown = (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              if (this.draft) this.finishDrawing();
+              else this.select(c.id);
+            }
+          };
+          this.hitSvg.append(hit);
+          this.hits.set(c.id, hit);
+        }
+        const g = this.geometry(c);
+        if (c.path) {
+          c.path.setAttribute("d", g.d);
+          c.path.classList.toggle("wire-selected-path", c.id === this.selected);
+        }
+        hit.setAttribute("d", g.d);
+        hit.classList.toggle("is-selected", c.id === this.selected);
+        hit.setAttribute("aria-label", "選取連線：" + c.label);
+        hit.dataset.edge = c.id;
+        if (c.id !== this.selected) continue;
+        const values = [
+          ["from", g.from],
+          ...g.waypoints.map((p, i) => ["point-" + i, p]),
+          ["to", g.to],
+        ];
+        for (const [end, p] of values) {
+          // Preview bends are never handles; only points explicitly placed by the user are shown.
+          if (this.draft && end.startsWith("point-")) continue;
           const key = JSON.stringify([c.id, end]);
-          wanted.add(key);
-          let handle = [...this.layer.children].find(
-            (h) => h.dataset.key === key,
-          );
-          if (!handle) {
-            handle = document.createElement("button");
-            handle.type = "button";
-            handle.className = "wire-handle wire-handle-" + end;
-            handle.dataset.key = key;
-            this.layer.append(handle);
-            this.bind(handle, c.id, end);
+          wantedHandles.add(key);
+          let h = this.handles.get(key);
+          if (!h) {
+            h = document.createElement("button");
+            h.type = "button";
+            h.className =
+              "wire-handle " +
+              (end.startsWith("point-")
+                ? "wire-handle-joint"
+                : "wire-handle-end");
+            h.dataset.end = end;
+            h.dataset.edge = c.id;
+            this.layer.append(h);
+            this.handles.set(key, h);
+            this.bind(h, c.id, end);
           }
-          handle.dataset.edge = c.id;
-          handle.dataset.end = end;
-          handle.classList.toggle("is-selected", c.id === this.selected);
-          handle.setAttribute(
+          h.style.left = p.x + "px";
+          h.style.top = p.y + "px";
+          h.setAttribute(
             "aria-label",
             c.label +
               "：" +
-              { from: "起點", to: "終點", via: "轉折點" }[end] +
-              "，拖曳或用方向鍵調整；Delete 還原",
+              (end === "from" ? "起點" : end === "to" ? "終點" : "自訂轉折點") +
+              "；方向鍵沿格點移動，Delete 刪除轉折",
           );
-          handle.title = handle.getAttribute("aria-label");
-          handle.style.left = geometry[end].x + "px";
-          handle.style.top = geometry[end].y + "px";
         }
       }
-      for (const h of [...this.layer.children])
-        if (!wanted.has(h.dataset.key)) h.remove();
+      for (const [id, h] of this.hits)
+        if (!wantedHits.has(id)) {
+          h.remove();
+          this.hits.delete(id);
+        }
+      for (const [key, h] of this.handles)
+        if (!wantedHandles.has(key)) {
+          h.remove();
+          this.handles.delete(key);
+        }
     }
     bind(handle, id, end) {
       const update = (p) => {
         const c = this.connections.find((c) => c.id === id);
         if (!c) return;
         const r = this.record(id);
-        r[end] =
-          end === "via"
-            ? { x: Math.max(0, p.x), y: Math.max(0, p.y) }
-            : nearest(end === "from" ? c.a : c.b, p);
+        if (end.startsWith("point-"))
+          r.waypoints[Number(end.slice(6))] = snapped(p);
+        else r[end] = nearest(end === "from" ? c.a : c.b, p);
         this.redraw();
       };
       handle.onpointerdown = (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
-        this.selected = id;
+        if (this.draft) {
+          if (end === "to") this.finishDrawing();
+          return;
+        }
         handle.setPointerCapture(e.pointerId);
-        this.sync(this.connections);
+        let moved = false;
         handle.onpointermove = (ev) => {
-          const rect = this.world.getBoundingClientRect(),
-            scale = rect.width / this.world.offsetWidth;
-          update({
-            x: (ev.clientX - rect.left) / scale,
-            y: (ev.clientY - rect.top) / scale,
-          });
+          moved = true;
+          update(this.coordinates(ev));
         };
         handle.onpointerup = handle.onpointercancel = () => {
           handle.onpointermove = null;
-          this.save();
+          if (moved) this.save();
         };
       };
+      handle.onclick = (e) => e.stopPropagation();
       handle.onkeydown = (e) => {
-        if (e.key === "Delete" || e.key === "Backspace") {
+        if (e.key === "Escape") {
+          this.deselect();
+          return;
+        }
+        if (["Delete", "Backspace"].includes(e.key)) {
           e.preventDefault();
-          delete this.record(id)[end];
+          e.stopPropagation();
+          if (end.startsWith("point-"))
+            this.record(id).waypoints.splice(Number(end.slice(6)), 1);
+          else delete this.record(id)[end];
           this.save();
           this.redraw();
           return;
@@ -284,10 +513,12 @@
           return;
         e.preventDefault();
         e.stopPropagation();
-        this.selected = id;
         const c = this.connections.find((c) => c.id === id),
-          p = route(c.a, c.b, this.state.routes[id], c.self)[end],
-          step = e.shiftKey ? 20 : 5;
+          g = this.geometry(c),
+          p = end.startsWith("point-")
+            ? g.waypoints[Number(end.slice(6))]
+            : g[end],
+          step = e.shiftKey ? GRID * 5 : GRID;
         update({
           x:
             p.x +
@@ -300,7 +531,17 @@
       };
     }
   }
-  const api = { hash, load, anchor, nearest, route, Editor };
+  const api = {
+    GRID,
+    snap,
+    snapped,
+    hash,
+    load,
+    anchor,
+    nearest,
+    route,
+    Editor,
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else scope.WireLayout = api;
 })(globalThis);

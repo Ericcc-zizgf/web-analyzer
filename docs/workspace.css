@@ -2220,22 +2220,31 @@ body.component-mode .canvas-metrics {
   max-height: none;
 }
 
-/* Editable routes: controls sit above cards, only while editing. */
+
+/* Circuit-style wiring: the drawing grid and routes share world coordinates. */
+.flow-canvas, .component-flow-canvas { background-image:none; }
+.flow-world, .component-flow-world {
+  background-image:radial-gradient(circle, #81948955 1px, transparent 1px);
+  background-size:20px 20px;
+  background-position:0 0;
+}
 .main-wire-tools { position:fixed; z-index:8; left:24px; bottom:22px; max-width:calc(100% - 230px); }
-.wire-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; color:#dce6df; font-size:12px; }
-.wire-toolbar button, .wire-toolbar select { color:#edf4ef; background:#242b27; border:1px solid #65746b; border-radius:6px; padding:7px 9px; font:inherit; }
-.wire-toolbar button[aria-pressed="true"] { border-color:#a8e3b6; background:#334b3a; }
-.wire-toolbar select { max-width:250px; }
+.wire-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 10px; background:#17201bed; border:1px solid #46534a; border-radius:8px; color:#dce6df; font-size:12px; }
+.wire-toolbar button { color:#edf4ef; background:#242b27; border:1px solid #65746b; border-radius:6px; padding:7px 9px; font:inherit; }
+.wire-selection-label { max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .wire-save-status { font-size:11px; color:#b9c9be; }
 .wire-edit-layer { position:absolute; inset:0; z-index:7; pointer-events:none; }
-.wire-handle { position:absolute; pointer-events:auto; width:18px; height:18px; min-width:0; min-height:0; padding:0; border:2px solid #c4f5cf; border-radius:50%; background:#263e2e; transform:translate(-50%,-50%); touch-action:none; cursor:grab; }
-.wire-handle-via { width:16px; height:16px; border-radius:4px; border-color:#8c9b92; }
-.wire-handle.is-selected { border-color:#d0fddd; background:#477e55; }
-.wire-handle:focus-visible { outline:3px solid #fff; outline-offset:3px; }
+.wire-hit-layer { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.wire-hit-layer .wire-hit { fill:none; stroke:transparent; stroke-width:14; vector-effect:non-scaling-stroke; pointer-events:stroke; cursor:pointer; }
+.wire-hit-layer .wire-hit.is-selected { stroke:#a8ebbd33; }
+.wire-hit-layer .wire-hit:focus-visible { outline:none; stroke:#a8ebbd55; }
+.flow-edges path.wire-selected-path, .component-flow-edges path.wire-selected-path { stroke:#b4edc5; stroke-width:2; }
+.wire-handle { position:absolute; pointer-events:auto; width:12px; height:12px; min-width:0; min-height:0; padding:0; border:2px solid #c4f5cf; border-radius:50%; background:#263e2e; transform:translate(-50%,-50%); touch-action:none; cursor:grab; }
+.wire-handle-joint { width:10px; height:10px; border-radius:1px; }
+.wire-handle:focus-visible { outline:2px solid #fff; outline-offset:3px; }
 .wire-handle:active { cursor:grabbing; }
-.canvas-hint { bottom:66px; }
-.canvas-list .main-wire-tools, .canvas-list .wire-edit-layer { display:none; }
+.is-wiring, .is-wiring .wire-hit { cursor:crosshair; }
+.canvas-hint { bottom:86px; }
+.canvas-list .main-wire-tools, .canvas-list .wire-edit-layer, body.component-mode .main-wire-tools { display:none; }
+.component-flow-edge-hit { pointer-events:none; }
 @media(max-width:760px) { .main-wire-tools, .flow-world > .wire-edit-layer { display:none; } }
-
-body.component-mode .main-wire-tools { display:none; }
-.component-flow-edges .component-flow-edge-hit { stroke:transparent; stroke-width:14; pointer-events:stroke; cursor:pointer; }

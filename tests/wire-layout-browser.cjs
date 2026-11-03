@@ -14,18 +14,51 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   page.on("pageerror", (e) => errors.push(e.message));
   const url = process.env.ANALYZER_URL || "http://127.0.0.1:8765/docs/";
   const main = ".main-wire-tools",
-    layer = ".flow-world > .wire-edit-layer";
-  const stored = () =>
-    page.evaluate(() =>
-      JSON.parse(localStorage.getItem("web-analyzer:layout:v1:main")),
-    );
+    world = ".flow-world",
+    key = "web-analyzer:layout:v1:main";
+  const state = () =>
+    page.evaluate((key) => JSON.parse(localStorage.getItem(key)), key);
+  async function screen(selector, p) {
+    return page.locator(selector).evaluate((el, p) => {
+      const r = el.getBoundingClientRect(),
+        s = r.width / el.offsetWidth;
+      return { x: r.left + p.x * s, y: r.top + p.y * s };
+    }, p);
+  }
+  async function clickPoint(selector, p, count = 1) {
+    const s = await screen(selector, p);
+    await page.mouse.click(s.x, s.y, { clickCount: count });
+  }
+  async function linePoint(selector) {
+    return page
+      .locator(selector)
+      .first()
+      .evaluate((el) => {
+        const p = [
+          ...el.getAttribute("d").matchAll(/[ML]([\d.]+),([\d.]+)/g),
+        ].map((m) => ({ x: +m[1], y: +m[2] }));
+        let max = 0,
+          result;
+        for (let i = 1; i < p.length; i++) {
+          let d = Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y);
+          if (d > max) {
+            max = d;
+            result = {
+              x: (p[i].x + p[i - 1].x) / 2,
+              y: (p[i].y + p[i - 1].y) / 2,
+            };
+          }
+        }
+        return result;
+      });
+  }
   async function drag(locator, dx, dy) {
     const r = await locator.boundingBox();
     assert.ok(r);
     await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
     await page.mouse.down();
     await page.mouse.move(r.x + r.width / 2 + dx, r.y + r.height / 2 + dy, {
-      steps: 12,
+      steps: 10,
     });
     await page.mouse.up();
   }
@@ -70,144 +103,171 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
         }),
       );
     }, extra);
+    await page.getByRole("button", { name: "展開全部", exact: true }).click();
   }
   try {
     await page.goto(url);
-    await page
-      .locator(main + " .wire-toolbar button")
-      .first()
-      .waitFor();
-    await page
-      .locator(main + " .wire-toolbar button")
-      .first()
-      .click();
-    await page
-      .locator(main + " select")
-      .last()
-      .selectOption("orthogonal");
-    await page.waitForFunction(() =>
-      document
-        .querySelector(".flow-edges path")
-        .getAttribute("d")
-        .includes(" L"),
-    );
-    await drag(page.locator(layer + " .wire-handle-via").first(), 48, 34);
-    await drag(page.locator(layer + " .wire-handle-from"), -12, 80);
-    let state = await stored(),
-      id = Object.keys(state.routes)[0];
-    assert.equal(state.routes[id].style, "orthogonal");
-    assert.ok(state.routes[id].via);
-    assert.ok(state.routes[id].from);
-    await page.locator(layer + " .wire-handle-to").press("ArrowDown");
-    const routesBefore = (await stored()).routes;
-    // Header moves and route persistence through a real reload.
-    await page.locator("#source-node .flow-node-heading").focus();
-    await page.keyboard.press("ArrowDown");
-    const pos = (await stored()).nodes["source-node"];
-    assert.ok(pos);
-    await page.reload();
-    await page
-      .locator(main + " .wire-toolbar button")
-      .first()
-      .waitFor();
-    assert.deepEqual((await stored()).routes, routesBefore);
+    await page.locator(".wire-hit").first().waitFor();
     assert.equal(
-      await page.locator("#source-node").evaluate((el) => el.offsetTop),
-      pos.y,
+      await page.locator(".wire-handle").count(),
+      0,
+      "no control-point clutter before selection",
     );
-    assert.match(
-      await page.locator(".flow-edges path").first().getAttribute("d"),
-      / L/,
+    assert.equal(
+      await page.locator(".wire-toolbar select").count(),
+      0,
+      "no curve selector",
     );
+    const p = await linePoint(".flow-edges path");
+    await clickPoint(world, p);
+    assert.equal(
+      await page.locator(world + " .wire-handle").count(),
+      2,
+      "only endpoints on selected wire",
+    );
+    await clickPoint(world, p, 2);
+    await page.locator(world + " .wire-handle-joint").waitFor();
+    assert.equal(
+      await page.locator(world + " .wire-handle-joint").count(),
+      1,
+      "double-click adds one explicit joint",
+    );
+    await drag(page.locator(world + " .wire-handle-joint"), 23, 37);
+    let saved = await state(),
+      id = Object.keys(saved.routes)[0];
+    assert.equal(saved.routes[id].waypoints.length, 1);
+    for (const n of Object.values(saved.routes[id].waypoints[0]))
+      assert.equal(n % 20, 0);
+    await page.locator(world + " .wire-handle-joint").press("Delete");
     await page
-      .locator(main + " .wire-toolbar button")
+      .locator(world + " .wire-handle-joint")
+      .waitFor({ state: "detached" });
+    assert.equal(await page.locator(world + " .wire-handle-joint").count(), 0);
+    await page
+      .getByRole("button", { name: "逐點重畫", exact: true })
       .first()
       .click();
+    await clickPoint(world, { x: 340, y: 200 });
+    await clickPoint(world, { x: 340, y: 100 });
     await page
-      .locator(main + " select")
-      .last()
-      .selectOption("curve");
-    await page.waitForFunction(() =>
-      document
-        .querySelector(".flow-edges path")
-        .getAttribute("d")
-        .includes(" C"),
+      .getByRole("button", { name: "完成接線", exact: true })
+      .first()
+      .click();
+    saved = await state();
+    assert.deepEqual(saved.routes[id].waypoints, [
+      { x: 340, y: 200 },
+      { x: 340, y: 100 },
+    ]);
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll(".flow-world .wire-handle-joint").length ===
+        2,
     );
-    // Test actual pointer dragging while zoomed out: coordinates must use world scale.
+    // Cancellation must not overwrite the saved route.
+    await page
+      .getByRole("button", { name: "逐點重畫", exact: true })
+      .first()
+      .click();
+    await clickPoint(world, { x: 200, y: 120 });
+    await page.keyboard.press("Escape");
+    assert.deepEqual((await state()).routes, saved.routes);
+    await drag(page.locator(world + ' .wire-handle[data-end="from"]'), 0, 23);
+    await page.reload();
+    await page.locator(".wire-hit").first().waitFor();
+    assert.deepEqual(
+      (await state()).routes[id].waypoints,
+      saved.routes[id].waypoints,
+    );
+    assert.equal(await page.locator(".wire-handle").count(), 0);
+    const actual = await page
+      .locator(".flow-edges path")
+      .first()
+      .getAttribute("d");
+    assert.ok(!actual.includes("C"));
+    assert.ok(actual.includes("340,200"));
+    // Zoom must not break grid snapping.
     await page.getByRole("button", { name: "縮小畫布", exact: true }).click();
-    await drag(page.locator(layer + " .wire-handle-via").first(), 20, 20);
-    assert.ok((await stored()).routes[id].via.x > routesBefore[id].via.x);
+    await page.locator(".wire-hit").first().focus();
+    await page.keyboard.press("Enter");
+    await drag(page.locator(world + " .wire-handle-joint").first(), 19, 21);
+    for (const n of Object.values((await state()).routes[id].waypoints[0]))
+      assert.equal(n % 20, 0);
     await inject();
-    await page.getByRole("button", { name: "展開全部", exact: true }).click();
-    const ft = ".component-flow-top .wire-toolbar",
-      fl = ".component-flow-world > .wire-edit-layer";
+    const fw = ".component-flow-world",
+      ft = ".component-flow-top";
+    assert.equal(await page.locator(fw + " .wire-handle").count(), 0);
+    await page.locator(fw + " .wire-hit").focus();
+    await page.keyboard.press("Enter");
     await page
-      .locator(ft + " button")
-      .first()
+      .locator(ft)
+      .getByRole("button", { name: "逐點重畫", exact: true })
       .click();
+    await clickPoint(fw, { x: 340, y: 220 });
+    await page.locator(fw + ' .wire-handle[data-end="to"]').click();
     await page
-      .locator(ft + " select")
-      .last()
-      .selectOption("orthogonal");
-    await drag(page.locator(fl + " .wire-handle-via"), 50, 60);
-    await drag(page.locator(fl + " .wire-handle-to"), 20, 30);
-    await page.locator(".component-flow-handle").first().press("ArrowDown");
-    const functionState = await page.evaluate(() =>
-      Object.fromEntries(
-        Object.entries(localStorage).filter(([k]) => k.includes("functions-")),
-      ),
-    );
-    const functionKey = Object.keys(functionState)[0],
-      fs = JSON.parse(functionState[functionKey]);
-    assert.ok(fs.nodes.a);
-    assert.ok(Object.values(fs.routes)[0].via);
-    await page.reload();
-    await inject();
-    await page.getByRole("button", { name: "展開全部", exact: true }).click();
-    assert.match(
-      await page
-        .locator(".component-flow-edges > path")
-        .first()
-        .getAttribute("d"),
-      / L/,
-    );
-    assert.equal(
-      await page.locator('[data-flow-node="a"]').evaluate((e) => e.offsetTop),
-      fs.nodes.a.y,
-    );
-    await page.locator(".component-flow-edge-hit").press("Enter");
+      .locator(ft)
+      .getByRole("button", { name: "查看程式碼依據", exact: true })
+      .click();
     assert.equal(
       await page.locator(".component-flow-evidence").isVisible(),
       true,
     );
-    await inject("different");
-    await page.getByRole("button", { name: "展開全部", exact: true }).click();
-    assert.match(
-      await page
-        .locator(".component-flow-edges > path")
-        .first()
-        .getAttribute("d"),
-      / C/,
-      "different graph has independent routes",
+    await page.reload();
+    await inject();
+    assert.ok(
+      (
+        await page
+          .locator(".component-flow-edges > path")
+          .first()
+          .getAttribute("d")
+      ).includes("340,220"),
     );
-    // Corrupt/blocked storage must not prevent the application from starting.
-    await page.evaluate(() =>
-      localStorage.setItem("web-analyzer:layout:v1:main", "bad-json"),
+    await inject("other");
+    assert.ok(
+      !(
+        await page
+          .locator(".component-flow-edges > path")
+          .first()
+          .getAttribute("d")
+      ).includes("340,220"),
+      "different graph is independent",
+    );
+    // Legacy curved routes are safely migrated into clean grid wires.
+    await page.evaluate(
+      (key) =>
+        localStorage.setItem(
+          key,
+          JSON.stringify({
+            version: 1,
+            nodes: {},
+            routes: {
+              '["source-node","pages-node"]': {
+                style: "curve",
+                via: { x: 333, y: 199 },
+              },
+            },
+          }),
+        ),
+      key,
     );
     await page.reload();
-    await page
-      .locator(main + " .wire-toolbar button")
-      .first()
-      .click();
+    await page.locator(".wire-hit").first().focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await page.locator(".wire-handle-joint").count(), 0);
+    assert.ok(
+      !(
+        await page.locator(".flow-edges path").first().getAttribute("d")
+      ).includes("C"),
+    );
     await page.evaluate(() => {
       Storage.prototype.setItem = () => {
-        throw new Error("quota");
+        throw Error("quota");
       };
     });
     await page
-      .locator(main + " select")
-      .last()
-      .selectOption("orthogonal");
+      .getByRole("button", { name: "還原這條線", exact: true })
+      .first()
+      .click();
     assert.match(
       await page.locator(main + " .wire-save-status").textContent(),
       /無法儲存/,
@@ -216,7 +276,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     assert.equal(await page.locator(main).isVisible(), false);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS browser: endpoint/waypoint pointer drag, keyboard, curve/orthogonal switch, zoom, card position and route reload, function graph persistence/isolation, invalid/blocked storage and mobile",
+      "PASS browser: direct line selection, no idle handles, explicit add/delete/drag joints, point-to-point wiring, cancel, grid snap at zoom, reload, function evidence/isolation, v1 migration and denied storage",
     );
   } finally {
     await browser.close();

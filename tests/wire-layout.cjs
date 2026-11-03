@@ -1,60 +1,92 @@
-const assert = require("node:assert/strict");
-const W = require("../frontend/wire-layout.js");
-const a = { x: 40, y: 80, width: 200, height: 160 },
-  b = { x: 600, y: 350, width: 240, height: 200 };
-for (const side of ["left", "right", "top", "bottom"]) {
-  const saved = {
-    from: { side, t: 0.35 },
-    to: { side, t: 0.65 },
-    via: { x: 440, y: 240 },
-  };
-  for (const style of ["curve", "orthogonal"]) {
-    const r = W.route(a, b, { ...saved, style });
-    assert.ok(!/NaN|undefined|Infinity/.test(r.d));
-    assert.equal(r.via.x, 440);
-    assert.equal(r.via.y, 240);
-    assert.match(r.d, style === "curve" ? / C/ : / L/);
+const assert = require("node:assert/strict"),
+  W = require("../frontend/wire-layout.js");
+const a = { x: 37, y: 81, width: 203, height: 157 },
+  b = { x: 601, y: 351, width: 241, height: 199 };
+function check(r) {
+  assert.ok(!/[CQ]|NaN|Infinity|undefined/.test(r.d));
+  for (const p of r.points) {
+    assert.equal(p.x % W.GRID, 0);
+    assert.equal(p.y % W.GRID, 0);
   }
+  for (const s of r.segments)
+    assert.ok(
+      s.a.x === s.b.x || s.a.y === s.b.y,
+      "only horizontal/vertical segments",
+    );
 }
-const orth = W.route(a, b, { style: "orthogonal", via: { x: 430, y: 220 } });
-const coords = [...orth.d.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)].map((m) => [
-  Number(m[1]),
-  Number(m[2]),
-]);
-for (let i = 1; i < coords.length; i++)
-  assert.ok(
-    coords[i - 1][0] === coords[i][0] || coords[i - 1][1] === coords[i][1],
-    "all orthogonal segments remain axis aligned",
-  );
-assert.deepEqual(W.nearest(a, { x: 125, y: 79 }), { side: "top", t: 0.425 });
-assert.equal(
-  W.route(a, b, { from: { side: "bottom", t: 0.5 } }).from.y,
-  a.y + a.height,
+for (const side of ["left", "right", "top", "bottom"])
+  for (const other of ["left", "right", "top", "bottom"]) {
+    check(
+      W.route(a, b, {
+        from: { side, t: 0.37 },
+        to: { side: other, t: 0.62 },
+        waypoints: [
+          { x: 433, y: 287 },
+          { x: 519, y: 113 },
+        ],
+      }),
+    );
+  }
+check(W.route(a, b));
+check(W.route(a, a, {}, true));
+const below = W.route(a, { ...a, y: 400 });
+assert.equal(below.from.dy, 1);
+assert.equal(below.to.dy, -1);
+assert.ok(
+  below.points.length <= 4,
+  "vertical neighbors use simple facing ports",
 );
-assert.deepEqual(W.load({ getItem: () => "{broken" }, "x"), {
-  version: 1,
+assert.equal(W.route(a, b).waypoints.length, 0, "no invented joint handles");
+assert.deepEqual(W.route(a, b, { waypoints: [{ x: 433, y: 287 }] }).waypoints, [
+  { x: 440, y: 280 },
+]);
+const old = W.load(
+  {
+    getItem: () =>
+      JSON.stringify({
+        version: 1,
+        nodes: { a: { x: 10, y: 50 } },
+        routes: {
+          edge: {
+            style: "curve",
+            via: { x: 12, y: 18 },
+            from: { side: "top", t: 0.5 },
+          },
+        },
+      }),
+  },
+  "x",
+);
+assert.equal(old.version, 2);
+assert.deepEqual(old.nodes.a, { x: 10, y: 50 });
+assert.deepEqual(old.routes.edge.waypoints, []);
+assert.equal(old.routes.edge.from.side, "top");
+assert.equal(old.routes.edge.via, undefined);
+const state = W.load(
+  {
+    getItem: () =>
+      JSON.stringify({
+        version: 2,
+        nodes: { bad: { x: "bad", y: 1 } },
+        routes: {
+          e: {
+            waypoints: [
+              { x: 31, y: 49 },
+              { x: "bad", y: 1 },
+            ],
+          },
+        },
+      }),
+  },
+  "x",
+);
+assert.deepEqual(state.routes.e.waypoints, [{ x: 40, y: 40 }]);
+assert.deepEqual(state.nodes, {});
+assert.deepEqual(W.load({ getItem: () => "{bad" }, "x"), {
+  version: 2,
   nodes: {},
   routes: {},
 });
-const stored = {
-  version: 1,
-  nodes: { a: { x: 11, y: 42 }, bad: { x: "bad", y: 4 } },
-  routes: {
-    edge: {
-      style: "orthogonal",
-      from: { side: "top", t: 8 },
-      to: { side: "other", t: 0.5 },
-      via: { x: 430, y: 220 },
-    },
-  },
-};
-const loaded = W.load({ getItem: () => JSON.stringify(stored) }, "x");
-assert.deepEqual(loaded.nodes, { a: { x: 11, y: 42 } });
-assert.equal(loaded.routes.edge.from.t, 1);
-assert.equal(loaded.routes.edge.to, undefined);
-assert.equal(loaded.routes.edge.style, "orthogonal");
-assert.ok(!/NaN/.test(W.route(a, a, {}, true).d));
-assert.notEqual(W.hash("project-a"), W.hash("project-b"));
 console.log(
-  "PASS routing from all four sides, orthogonal segments, normalized anchors, self-loop, persistence validation, corrupt storage recovery",
+  "PASS all endpoints/sides on grid, orthogonal segments, simple default routes, explicit joints, legacy migration and invalid storage",
 );

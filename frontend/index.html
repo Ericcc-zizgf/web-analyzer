@@ -4,32 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>網頁分析器 · HTML 結構工作台</title>
-    <link
-      rel="stylesheet"
-      href="/static/workspace.css?v=20261103-htmlrefine11"
-    />
+    <link rel="stylesheet" href="/static/workspace.css?v=20261103-dialog12" />
+    <script src="/static/source-utils.js?v=20261103-dialog12" defer></script>
     <script
-      src="/static/source-utils.js?v=20261103-htmlrefine11"
+      src="/static/source-code-view.js?v=20261103-dialog12"
       defer
     ></script>
-    <script
-      src="/static/source-code-view.js?v=20261103-htmlrefine11"
-      defer
-    ></script>
-    <script
-      src="/static/project-core.js?v=20261103-htmlrefine11"
-      defer
-    ></script>
-    <script
-      src="/static/project-page.js?v=20261103-htmlrefine11"
-      defer
-    ></script>
-    <script
-      src="/static/static-analyzer.js?v=20261103-htmlrefine11"
-      defer
-    ></script>
-    <script src="/static/app.js?v=20261103-htmlrefine11" defer></script>
-    <script src="/static/project-ui.js?v=20261103-htmlrefine11" defer></script>
+    <script src="/static/project-core.js?v=20261103-dialog12" defer></script>
+    <script src="/static/project-page.js?v=20261103-dialog12" defer></script>
+    <script src="/static/static-analyzer.js?v=20261103-dialog12" defer></script>
+    <script src="/static/app.js?v=20261103-dialog12" defer></script>
+    <script src="/static/project-ui.js?v=20261103-dialog12" defer></script>
   </head>
   <body data-runtime="local">
     <header class="topbar">
@@ -60,13 +45,26 @@
         </div>
         <span class="workspace-badge">HTML STRUCTURE</span>
       </div>
-      <section class="card source-card" aria-labelledby="project-heading">
+      <dialog
+        id="source-dialog"
+        class="card source-card source-dialog"
+        aria-labelledby="project-heading"
+      >
         <div class="card-heading">
           <div>
             <p class="eyebrow">01 / SOURCE</p>
             <h2 id="project-heading">專案與頁面</h2>
           </div>
-          <span id="project-name" class="muted">尚未開啟專案</span>
+          <div class="dialog-heading-actions">
+            <span id="project-name" class="muted">尚未開啟專案</span
+            ><button
+              id="source-close"
+              type="button"
+              aria-label="關閉開啟專案視窗"
+            >
+              ✕
+            </button>
+          </div>
         </div>
         <div class="source-options">
           <div>
@@ -143,46 +141,25 @@
             </form>
           </details>
         </div>
-        <div id="project-page-controls" hidden>
-          <div class="page-picker">
-            <label for="project-page">目前頁面</label
-            ><select id="project-page"></select
-            ><button id="project-page-reanalyze" type="button">
-              重新讀取此頁</button
-            ><span id="page-count" class="muted"></span>
-          </div>
-          <p id="project-page-status" role="status"></p>
-          <details class="page-directory">
-            <summary>切換其他 HTML 頁面</summary>
-            <input
-              id="page-search"
-              type="search"
-              placeholder="搜尋頁面名稱或標題"
-              aria-label="搜尋 HTML 頁面"
-            />
-            <div id="page-list"></div>
-            <button id="page-more" type="button" hidden>更多頁面</button>
-          </details>
-          <details id="project-skipped"></details>
-        </div>
-      </section>
+        <details id="project-skipped"></details>
+        <p
+          id="upload-feedback"
+          class="muted"
+          role="status"
+          aria-live="polite"
+        ></p>
+      </dialog>
       <p id="status" class="status" role="status" aria-live="polite">
         選擇資料夾或輸入 HTML，開始查看結構。
       </p>
-      <section id="empty-state" class="card empty-state">
-        <span class="empty-symbol">&lt;html&gt;</span>
-        <h2>先開啟一個頁面。</h2>
-        <p class="muted">
-          HTML 結構、網頁預覽與元素資訊會在固定卡片內顯示。<br />不需要整理節點或接線。
-        </p>
-      </section>
-      <section id="results" hidden aria-label="HTML 結構工作區">
+      <section id="results" aria-label="HTML 結構工作區">
         <div class="results-heading">
           <div>
-            <strong id="source-label"></strong><span id="count-elements">0</span
+            <strong id="source-label">尚未開啟頁面</strong
+            ><span id="count-elements">0</span
             ><span class="muted">個 HTML 元素</span>
           </div>
-          <details id="warnings">
+          <details id="warnings" hidden>
             <summary id="warnings-title">讀取紀錄</summary>
             <ul id="warning-list"></ul>
           </details>
@@ -196,17 +173,36 @@
               </div>
               <span id="tree-total" class="muted"></span>
             </div>
+            <div id="project-page-controls" class="tree-page-picker">
+              <label for="project-page">目前 HTML 頁面</label>
+              <select id="project-page" aria-label="目前 HTML 頁面" disabled>
+                <option value="">尚未開啟頁面</option>
+              </select>
+              <div class="tree-page-meta">
+                <span id="page-count">尚未載入</span
+                ><span
+                  id="project-page-status"
+                  role="status"
+                  aria-live="polite"
+                ></span>
+              </div>
+            </div>
             <input
               id="tree-search"
               type="search"
+              disabled
               placeholder="搜尋標籤、id、class、文字"
               aria-label="搜尋 HTML 元素"
             />
             <div class="tree-actions">
-              <button id="expand-tree">全部展開</button
-              ><button id="collapse-tree">全部收合</button>
+              <button id="expand-tree" disabled>全部展開</button
+              ><button id="collapse-tree" disabled>全部收合</button>
             </div>
-            <div id="tree" aria-label="HTML 結構清單"></div>
+            <div id="tree" aria-label="HTML 結構清單">
+              <p class="tree-empty-message">
+                開啟專案後，HTML 結構會顯示在這裡。
+              </p>
+            </div>
             <p class="muted">
               點選預覽會自動展開祖先並定位。也可從結構清單反向選取畫面。
             </p>
@@ -269,7 +265,14 @@
                 tabindex="0"
                 aria-label="桌面網頁預覽，可捲動瀏覽放大內容"
               >
-                <div id="preview-space">
+                <div id="preview-empty" class="preview-empty-state">
+                  <span>&lt;html&gt;</span><strong>網頁預覽</strong>
+                  <p>開啟專案或匯入 HTML，<br />就能在這裡點選畫面中的元素。</p>
+                  <button id="preview-open-project" type="button">
+                    開啟專案
+                  </button>
+                </div>
+                <div id="preview-space" hidden>
                   <iframe
                     id="preview"
                     title="可選取元素的靜態網頁預覽"
@@ -298,7 +301,11 @@
               </div>
             </div>
             <p id="selected-node" class="selected-node">尚未選取元素</p>
-            <div id="inspect-content"></div>
+            <div id="inspect-content">
+              <p class="muted">
+                選取預覽或 HTML 結構中的元素後，這裡會顯示屬性與上下層資訊。
+              </p>
+            </div>
           </aside>
         </div>
       </section>

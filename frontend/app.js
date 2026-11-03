@@ -38,6 +38,10 @@
   function status(text, error = false) {
     $("#status").textContent = text;
     $("#status").classList.toggle("error", error);
+    if ($("#source-dialog").open) {
+      $("#upload-feedback").textContent = text;
+      $("#upload-feedback").classList.toggle("error", error);
+    }
   }
   function label(n) {
     return n
@@ -564,8 +568,21 @@
       $("#count-elements").textContent = String(report.nodes.length);
       $("#source-label").textContent = report.source_label;
       $("#export-report").disabled = false;
-      $("#results").hidden = false;
-      $("#empty-state").hidden = true;
+      $("#preview-empty").hidden = true;
+      $("#preview-space").hidden = false;
+      $("#warnings").hidden = false;
+      for (const id of ["tree-search", "expand-tree", "collapse-tree"])
+        $("#" + id).disabled = false;
+      if (!projectInput) {
+        const picker = $("#project-page");
+        picker.replaceChildren(
+          new Option(report.source_label, report.source_label),
+        );
+        picker.disabled = true;
+        $("#page-count").textContent = "單一頁面";
+        $("#project-page-status").textContent = "";
+        window.dispatchEvent(new CustomEvent("html:single"));
+      }
       const warnings = [
         ...new Set([
           "HTML 結構依瀏覽器解析結果呈現。預覽保留可取得的樣式；來源腳本不執行，動態產生的元素可能不存在。",
@@ -580,6 +597,7 @@
       $("#preview").srcdoc = report.preview;
       status("HTML 分析完成。點選預覽中的元素，結構樹會同步定位。");
       window.dispatchEvent(new CustomEvent("html:ready"));
+      if ($("#source-dialog").open) $("#source-dialog").close();
       return true;
     } catch (e) {
       if (run === serial)
@@ -707,7 +725,13 @@
     if (report)
       download(sourceText, "selected-source.html", "text/html;charset=utf-8");
   };
-  $("#open-project").onclick = () => $("#project-folder").click();
+  const sourceDialog = $("#source-dialog");
+  function openSourceDialog() {
+    if (!sourceDialog.open) sourceDialog.showModal();
+  }
+  $("#open-project").onclick = openSourceDialog;
+  $("#preview-open-project").onclick = openSourceDialog;
+  $("#source-close").onclick = () => sourceDialog.close();
   $("#demo").onclick = () => {
     if (report) {
       showView("preview");
@@ -738,11 +762,27 @@
       expanded.clear();
       selected = null;
       $("#preview").srcdoc = "";
-      $("#results").hidden = true;
-      $("#empty-state").hidden = false;
+      $("#preview-space").hidden = true;
+      $("#preview-empty").hidden = false;
+      $("#warnings").hidden = true;
+      $("#source-label").textContent = "尚未開啟頁面";
+      $("#count-elements").textContent = "0";
+      for (const id of ["tree-search", "expand-tree", "collapse-tree"])
+        $("#" + id).disabled = true;
       $("#export-report").disabled = true;
-      $("#tree").replaceChildren();
-      $("#inspect-content").replaceChildren();
+      $("#tree").replaceChildren(
+        make("p", "開啟專案後，HTML 結構會顯示在這裡。", "tree-empty-message"),
+      );
+      $("#selected-node").textContent = "尚未選取元素";
+      $("#inspect-content").replaceChildren(
+        make(
+          "p",
+          "選取預覽或 HTML 結構中的元素後，這裡會顯示屬性與上下層資訊。",
+          "muted",
+        ),
+      );
+      $("#selection-path").replaceChildren();
+      showView("preview");
     },
   };
   if (browserOnly) {

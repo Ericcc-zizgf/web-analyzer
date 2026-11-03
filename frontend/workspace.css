@@ -1076,3 +1076,100 @@ button[aria-current="true"] {
     outline-color: #c4b5fa;
   }
 }
+
+/* Source input is a centered dialog; the three workspace cards remain visible underneath. */
+.source-dialog {
+  width: min(820px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: 24px;
+  color: #dedee8;
+}
+.source-dialog::backdrop {
+  background: #05050bd9;
+  backdrop-filter: blur(5px);
+}
+.source-dialog .source-options {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.source-dialog .dialog-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.source-dialog #source-close {
+  min-width: 34px;
+  padding: 5px 9px;
+}
+.tree-page-picker {
+  margin: 0 0 12px;
+}
+.tree-page-picker label {
+  margin: 0 0 5px;
+  color: #aaa5bc;
+  font-size: 11px;
+}
+.tree-page-picker select {
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+.tree-page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: #9a96aa;
+  font-size: 10px;
+  margin-top: 5px;
+}
+.tree-page-meta #project-page-status {
+  margin: 0;
+  font-size: 10px;
+}
+.tree-empty-message {
+  color: #9995a7;
+  font-size: 12px;
+  padding: 16px 4px;
+  line-height: 1.7;
+}
+.preview-empty-state {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 28px;
+  color: #eeeafa;
+}
+.preview-empty-state span {
+  font: 20px var(--mono);
+  color: #cbbcf5;
+  margin-bottom: 14px;
+}
+.preview-empty-state strong {
+  font-size: 15px;
+  font-weight: 550;
+}
+.preview-empty-state p {
+  color: #9694a4;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.preview-empty-state button {
+  font-size: 12px;
+}
+#upload-feedback.error {
+  color: #edb297;
+}
+@media (max-width: 800px) {
+  .source-dialog .source-options {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .source-dialog .source-options > #single-page {
+    border-left: 0;
+    border-top: 1px solid #ffffff15;
+    padding: 0;
+  }
+}

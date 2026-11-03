@@ -13,34 +13,17 @@
     project = null,
     profiles = [],
     limit = 20,
-    lastPageKey = "";
+    lastPageKey = "",
+    activePath = "";
   function status(text) {
     $("#project-status").textContent = text;
   }
   function renderPages() {
-    const q = $("#page-search").value.trim().toLowerCase(),
-      filtered = profiles.filter((p) =>
-        (p.path + " " + p.title).toLowerCase().includes(q),
-      ),
-      list = $("#page-list");
-    list.replaceChildren();
-    for (const p of filtered.slice(0, limit)) {
-      const b = make(
-        "button",
-        (p.title && p.title !== p.path ? p.title + " · " : "") + p.path,
-      );
-      b.type = "button";
-      b.title = p.path;
-      b.setAttribute(
-        "aria-current",
-        String($("#project-page").value === p.path),
-      );
-      b.onclick = () => openPage(p.path);
-      list.append(b);
-    }
-    if (!filtered.length) list.append(make("p", "沒有符合的 HTML 頁面。"));
-    $("#page-more").hidden = filtered.length <= limit;
-    $("#page-count").textContent = profiles.length + " 個 HTML 頁面";
+    const picker = $("#project-page");
+    picker.disabled = profiles.length <= 1;
+    $("#page-count").textContent = profiles.length
+      ? profiles.length + " 個 HTML 頁面"
+      : "尚未載入";
   }
   async function openPage(path) {
     if (!project || !sources.has(path)) return;
@@ -55,6 +38,8 @@
       report: project,
     });
     if (request !== pageSerial || run !== generation) return;
+    if (ok) activePath = path;
+    else if (activePath) $("#project-page").value = activePath;
     if (ok && lastPageKey) {
       try {
         localStorage.setItem(lastPageKey, path);
@@ -71,7 +56,10 @@
     sources = new Map();
     project = null;
     profiles = [];
-    $("#project-page-controls").hidden = true;
+    activePath = "";
+    $("#project-page").replaceChildren(new Option("正在讀取專案…", ""));
+    $("#project-page").disabled = true;
+    $("#page-count").textContent = "讀取中";
     $("#project-cancel").hidden = false;
     status("正在讀取 HTML 與預覽樣式…");
     try {
@@ -132,9 +120,10 @@
         skipped.append(make("p", item.path + "：" + item.reason));
       if (input.skipped.length > 60)
         skipped.append(make("p", "其餘略過項目未逐一列出。"));
-      $("#project-page-controls").hidden = !profiles.length;
-      $("#page-search").value = "";
-      limit = 20;
+      if (!profiles.length)
+        $("#project-page").replaceChildren(
+          new Option("沒有可用的 HTML 頁面", ""),
+        );
       renderPages();
       status(
         profiles.length
@@ -174,14 +163,15 @@
     status("已取消讀取。");
   };
   $("#project-page").onchange = (e) => openPage(e.target.value);
-  $("#project-page-reanalyze").onclick = () =>
-    openPage($("#project-page").value);
-  $("#page-search").oninput = () => {
-    limit = 20;
-    renderPages();
-  };
-  $("#page-more").onclick = () => {
-    limit += 20;
-    renderPages();
-  };
+  window.addEventListener("html:single", () => {
+    generation++;
+    pageSerial++;
+    sources = new Map();
+    project = null;
+    profiles = [];
+    lastPageKey = "";
+    activePath = "";
+    $("#project-cancel").hidden = true;
+    $("#project-folder").value = "";
+  });
 })();

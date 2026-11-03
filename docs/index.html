@@ -3,171 +3,180 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>網頁分析器 · 元件原始碼位置與跨檔案引用</title>
-    <link rel="stylesheet" href="./styles.css" />
-    <script src="./source-utils.js?v=20261103-scope8" defer></script>
-    <script src="./analysis-scope.js?v=20261103-scope8" defer></script>
-    <script src="./css-session.js?v=20261103-scope8" defer></script>
-    <script src="./css-lab.js?v=20261103-scope8" defer></script>
-    <script src="./static-analyzer.js?v=20261103-scope8" defer></script>
-    <script src="./source-code-view.js?v=20261103-scope8" defer></script>
-    <script src="./locator-index.js?v=20261103-scope8" defer></script>
-    <script src="./app.js?v=20261103-scope8" defer></script>
-    <link rel="stylesheet" href="./project.css?v=20261103-scope8">
-    <script src="./project-core.js?v=20261103-scope8" defer></script>
-    <script src="./project-page.js?v=20261103-scope8" defer></script>
-    <script src="./project-ui.js?v=20261103-scope8" defer></script>
-    <link rel="stylesheet" href="./workspace.css?v=20261103-scope8">
-    <script src="./canvas-layout.js?v=20261103-scope8" defer></script>
-    <script src="./wire-layout.js?v=20261103-scope8" defer></script>
-    <script src="./function-flow.js?v=20261103-scope8" defer></script>
-    <script src="./component-flow.js?v=20261103-scope8" defer></script>
-    <script src="./workspace.js?v=20261103-scope8" defer></script>
-    <link rel="stylesheet" href="./locator.css?v=20261103-scope8">
-    <script src="./locator-ui.js?v=20261103-scope8" defer></script>
+    <title>網頁分析器 · HTML 結構工作台</title>
+    <link rel="stylesheet" href="./workspace.css?v=20261103-html9" />
+    <script src="./source-utils.js?v=20261103-html9" defer></script>
+    <script src="./source-code-view.js?v=20261103-html9" defer></script>
+    <script src="./project-core.js?v=20261103-html9" defer></script>
+    <script src="./project-page.js?v=20261103-html9" defer></script>
+    <script src="./static-analyzer.js?v=20261103-html9" defer></script>
+    <script src="./app.js?v=20261103-html9" defer></script>
+    <script src="./project-ui.js?v=20261103-html9" defer></script>
   </head>
-  <body>
+  <body data-runtime="browser">
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-symbol">&lt;/&gt;</span>
-        <div>網頁分析器<small>結構・樣式・互動，一起看懂。</small></div>
-      </div>
+      <a class="brand" href="#"
+        ><span class="brand-symbol">&lt;/&gt;</span
+        ><span>網頁分析器<small>點選畫面，看懂 HTML 結構。</small></span></a
+      >
       <div class="top-actions">
-        <button id="demo">執行網頁預覽</button
-        ><button id="export-report" disabled>下載分析 JSON</button
-        ><a href="https://github.com/Ericcc-zizgf/web-analyzer#readme" id="home-link" target="_blank" rel="noopener"
-          >使用說明與原始碼 ↗</a
+        <button id="open-project" class="primary">開啟專案</button
+        ><button id="demo">執行網頁預覽</button
+        ><button id="export-report" disabled>匯出 HTML 結構</button
+        ><a
+          href="https://github.com/Ericcc-zizgf/web-analyzer"
+          target="_blank"
+          rel="noopener"
+          >使用說明 ↗</a
         >
       </div>
     </header>
     <main>
-      <section class="project-panel" aria-labelledby="project-heading">
-        <div class="project-heading"><div><p class="eyebrow">從整個專案開始</p>
-          <h2 id="project-heading">選一個資料夾，看懂每個檔案的分工。</h2>
-          <p class="muted">自動整理資料夾結構、檔案職責、函式與引用關係。選取後掃描所有 HTML，依內容與引用關係推測入口，並自動分析各頁的結構與 CSS／JS。</p></div>
+      <div class="workspace-intro">
+        <div>
+          <p class="eyebrow">HTML WORKSPACE</p>
+          <h1>從畫面，找到對應的結構。</h1>
+          <p class="muted">
+            開啟頁面 → 點選元素 → 查看 HTML、屬性與上下層關係。
+          </p>
         </div>
-        <label for="project-folder">選擇網頁專案資料夾</label>
-        <input id="project-folder" type="file" webkitdirectory multiple>
-        <p class="muted">支援 HTML、CSS、JS／TS、React、Python 與設定檔。自動略過 node_modules、.git、.env、vendor 與建置產物。單檔 768 KB、文字合計 16 MB，最多分析 1,500 個檔案。</p>
-        <div class="project-actions"><button id="project-cancel" type="button" hidden>取消專案分析</button><button id="project-export" type="button" disabled>下載專案 JSON</button><button id="project-notes" type="button" disabled>下載專案說明 Markdown</button></div>
-        <p id="project-status" role="status" aria-live="polite">先選擇專案資料夾，或繼續使用下方的單頁分析。</p>
-        <div id="project-page-controls" hidden>
-          <div id="project-page-picker"><label for="project-page">分析網頁（已自動使用資料夾內的檔案）</label>
-          <select id="project-page"></select><button id="project-page-reanalyze" type="button">重新分析此頁</button></div>
-          <p id="project-page-reason" class="muted"></p>
-          <p id="project-page-status" role="status" aria-live="polite"></p>
-          <a id="project-page-link" href="#results" hidden>查看網頁分析結果 ↓</a>
-        </div>
-        <section id="project-pages-overview" hidden aria-label="所有網頁的分析結果">
-          <h3>所有網頁 · 自動分析</h3>
-          <p id="project-pages-status" role="status" aria-live="polite"></p>
-          <button id="project-pages-cancel" type="button" hidden>取消其餘頁面分析</button>
-          <div class="project-pages-table"><table><thead><tr><th>HTML 檔案</th><th>頁面標題</th><th>HTML 元素</th><th>CSS 規則</th><th>JS 檔案</th><th>分析狀態</th></tr></thead><tbody id="project-pages-body"></tbody></table></div>
-          <p class="muted">每個 HTML 都會解析結構、CSS 與本機依賴。點檔名可查看完整工作台；JavaScript 函式與事件在開啟該頁時解析。入口推測無法代表公司的業務設定。</p>
-        </section>
-        <details id="project-map" hidden><summary>檔案結構與職責（展開查看）</summary>
-        <div id="project-results" hidden>
-          <h3 id="project-title"></h3><p id="project-summary"></p><div id="project-overview"></div>
-          <div class="project-workspace"><nav class="project-navigation" aria-label="專案檔案"><label for="project-search">搜尋檔案或職責</label><input id="project-search" type="search" placeholder="例如 app.js、樣式、測試"><div id="project-tree"></div></nav><article id="project-detail" aria-label="檔案職責與引用"></article></div>
-          <h4>分析範圍與待確認項目</h4><ul id="project-notices"></ul><details id="project-skipped"></details>
-        </div>
-        </details>
-      </section>
-
-      <section class="input-panel" id="input-panel">
-        <div class="input-heading">
+        <span class="workspace-badge">固定工作區</span>
+      </div>
+      <section class="card source-card" aria-labelledby="project-heading">
+        <div class="card-heading">
           <div>
-            <p class="eyebrow">開始探索</p>
-            <h1>讀懂畫面背後的程式碼。</h1>
+            <p class="eyebrow">01 / SOURCE</p>
+            <h2 id="project-heading">專案與頁面</h2>
           </div>
-          <div class="mode-tabs" role="tablist" aria-label="來源類型">
-            <button data-mode="url" class="active" role="tab" aria-selected="true">網址</button
-            ><button data-mode="html" role="tab" aria-selected="false">貼上 HTML</button
-            ><button data-mode="file" role="tab" aria-selected="false">上傳檔案</button>
-          </div>
+          <span id="project-name" class="muted">尚未開啟專案</span>
         </div>
-        <p class="muted">Pages 瀏覽器版：貼上或上傳 HTML，並附加 CSS／JS 即可分析。網址抓取請使用下載後的 Python 本機版；來源程式不會被執行。</p>
-        <form id="analyze-form">
-          <div id="input-url">
-            <label for="url">網頁網址</label
-            ><input
-              id="url"
-              type="url"
-              placeholder="https://example.com 或 http://127.0.0.1:5230/"
-            />
+        <div class="source-options">
+          <div>
+            <label for="project-folder">選擇專案資料夾</label
+            ><input id="project-folder" type="file" webkitdirectory multiple />
+            <p class="muted">
+              尋找 HTML 頁面，沿用資料夾內的樣式還原預覽。單檔 768 KB、合計 16
+              MB，最多 1,500 個來源檔案。
+            </p>
+            <button id="project-cancel" type="button" hidden>取消讀取</button>
+            <p id="project-status" role="status">
+              可開啟專案，也可展開右側單頁輸入。
+            </p>
           </div>
-          <div id="input-html" hidden>
-            <label for="html">HTML 原始碼或片段</label
-            ><textarea
-              id="html"
-              spellcheck="false"
-              placeholder="貼上 &lt;!doctype html&gt;… 或一個 HTML 區塊"
-            ></textarea>
-          </div>
-          <div id="input-file" hidden>
-            <label for="html-file">HTML 檔案（2 MB 以內）</label
-            ><input type="file" id="html-file" accept=".html,.htm,text/html" />
-            <p class="muted">例如網頁組裝室匯出的 HTML，可直接分析其中的樣式與互動。</p>
-          </div>
-          <div class="input-options">
-            <label class="checkbox"
-              ><input id="load-assets" type="checkbox" checked />讀取同來源 CSS／JS 檔案</label
-            >
-            <details>
-              <summary>附加檔案與基準網址</summary>
-              <div class="optional-fields">
-                <label for="base-url">基準網址（貼 HTML／檔案需要讀取線上資源時填寫）</label
+          <details id="single-page">
+            <summary>貼上 HTML／開啟單一檔案</summary>
+            <div class="mode-tabs" role="tablist" aria-label="來源類型">
+              <button data-mode="html" class="active" role="tab">
+                貼上 HTML</button
+              ><button data-mode="file" role="tab">上傳 HTML</button
+              ><button id="mode-url" data-mode="url" role="tab">網址</button>
+            </div>
+            <form id="analyze-form">
+              <div id="input-html">
+                <label for="html">HTML 原始碼</label
+                ><textarea
+                  id="html"
+                  spellcheck="false"
+                  placeholder="貼上整份 HTML 或一個 HTML 區塊"
+                ></textarea>
+              </div>
+              <div id="input-file" hidden>
+                <label for="html-file">HTML 檔案（2 MB 以內）</label
                 ><input
-                  id="base-url"
+                  id="html-file"
+                  type="file"
+                  accept=".html,.htm,text/html"
+                />
+              </div>
+              <div id="input-url" hidden>
+                <label for="url">網頁網址（本機版）</label
+                ><input
+                  id="url"
                   type="url"
-                  placeholder="https://example.com/page.html"
-                /><label for="asset-files"
-                  >附加 CSS／JavaScript（最多 12 份，同檔名不可重複）</label
+                  placeholder="https://example.com/"
+                />
+              </div>
+              <details class="optional-fields">
+                <summary>預覽外觀選項</summary>
+                <label class="checkbox"
+                  ><input
+                    id="load-assets"
+                    type="checkbox"
+                    checked
+                  />使用可取得的樣式還原預覽</label
+                ><label for="asset-files">附加樣式檔（僅預覽使用）</label
                 ><input
                   id="asset-files"
                   type="file"
                   multiple
-                  accept=".css,.js,.mjs,.jsx,.ts,.tsx"
+                  accept=".css,text/css"
+                /><label for="base-url">基準網址（選填，本機版使用）</label
+                ><input
+                  id="base-url"
+                  type="url"
+                  placeholder="https://example.com/page.html"
                 />
+              </details>
+              <div class="submit-actions">
+                <button id="analyze" type="submit" class="primary">
+                  分析 HTML</button
+                ><button id="cancel" type="button" hidden>取消分析</button>
               </div>
-            </details>
-            <div class="submit-actions">
-              <button type="submit" id="analyze" class="primary">分析網頁 →</button
-              ><button type="button" id="cancel" hidden>取消</button>
-            </div>
+            </form>
+          </details>
+        </div>
+        <div id="project-page-controls" hidden>
+          <div class="page-picker">
+            <label for="project-page">目前頁面</label
+            ><select id="project-page"></select
+            ><button id="project-page-reanalyze" type="button">
+              重新讀取此頁</button
+            ><span id="page-count" class="muted"></span>
           </div>
-        </form>
-        <p id="status" role="status" aria-live="polite">
-          貼入網址，或先用示範觀察分析結果。所有解析在本機進行。
+          <p id="project-page-status" role="status"></p>
+          <details class="page-directory">
+            <summary>切換其他 HTML 頁面</summary>
+            <input
+              id="page-search"
+              type="search"
+              placeholder="搜尋頁面名稱或標題"
+              aria-label="搜尋 HTML 頁面"
+            />
+            <div id="page-list"></div>
+            <button id="page-more" type="button" hidden>更多頁面</button>
+          </details>
+          <details id="project-skipped"></details>
+        </div>
+      </section>
+      <p id="status" class="status" role="status" aria-live="polite">
+        選擇資料夾或輸入 HTML，開始查看結構。
+      </p>
+      <section id="empty-state" class="card empty-state">
+        <span class="empty-symbol">&lt;html&gt;</span>
+        <h2>先開啟一個頁面。</h2>
+        <p class="muted">
+          HTML 結構、網頁預覽與元素資訊會在固定卡片內顯示。<br />不需要整理節點或接線。
         </p>
       </section>
-      <section id="results" hidden>
-        <div class="workspace-heading">
+      <section id="results" hidden aria-label="HTML 結構工作區">
+        <div class="results-heading">
           <div>
-            <span class="workspace-dot" aria-hidden="true"></span>
-            <h2>分析工作台</h2>
-            <span class="workspace-hint">點選畫面，追溯程式碼</span>
+            <strong id="source-label"></strong><span id="count-elements">0</span
+            ><span class="muted">個 HTML 元素</span>
           </div>
-          <button id="toggle-input" aria-expanded="true" aria-controls="input-panel">
-            收起輸入區
-          </button>
+          <details id="warnings">
+            <summary id="warnings-title">讀取紀錄</summary>
+            <ul id="warning-list"></ul>
+          </details>
         </div>
-        <div class="summary">
-          <div><span>HTML 元素</span><strong id="count-elements">0</strong></div>
-          <div><span>CSS 規則</span><strong id="count-css">0</strong></div>
-          <div><span>JS 函式</span><strong id="count-functions">0</strong></div>
-          <div><span>事件綁定</span><strong id="count-events">0</strong></div>
-          <p id="source-label"></p>
-        </div>
-        <details id="warnings">
-          <summary id="warnings-title">分析範圍與讀取紀錄</summary>
-          <ul id="warning-list"></ul>
-        </details>
         <div class="workbench">
-          <aside class="tree-panel">
-            <div class="panel-title">
-              <h2>HTML 結構樹</h2>
-              <span id="tree-total"></span>
+          <aside id="html-tree-card" class="card tree-panel">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">02 / STRUCTURE</p>
+                <h2>HTML 結構</h2>
+              </div>
+              <span id="tree-total" class="muted"></span>
             </div>
             <input
               id="tree-search"
@@ -179,74 +188,64 @@
               <button id="expand-tree">全部展開</button
               ><button id="collapse-tree">全部收合</button>
             </div>
-            <div id="tree" aria-label="HTML 結構"></div>
+            <div id="tree" aria-label="HTML 結構清單"></div>
             <p class="muted">
-              點選節點，對照畫布、屬性、樣式與程式碼。結構依 HTML5 解析器修復。
+              點選預覽會自動展開祖先並定位。也可從結構清單反向選取畫面。
             </p>
           </aside>
-          <section class="viewer">
-            <div class="viewer-toolbar">
-              <div class="view-tabs">
-                <button data-view="preview" class="active">網頁預覽</button
-                ><button data-view="source">原始碼</button>
+          <section class="card viewer">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">03 / PREVIEW</p>
+                <h2>網頁預覽</h2>
               </div>
               <div class="width-tabs">
                 <button data-width="full" aria-pressed="true">自適應</button
-                ><button data-width="768" aria-pressed="false" title="平板寬度 768px">
-                  平板</button
-                ><button data-width="375" aria-pressed="false" title="手機寬度 375px">
-                  手機
-                </button>
+                ><button data-width="768" aria-pressed="false">平板</button
+                ><button data-width="375" aria-pressed="false">手機</button>
               </div>
             </div>
+            <div class="view-tabs">
+              <button data-view="preview" class="active">網頁預覽</button
+              ><button data-view="source">HTML 原始碼</button>
+            </div>
             <div id="preview-view">
-              <div class="preview-notice">
-                不執行原頁 JavaScript，也不載入圖片／字型等網路資源。
-              </div>
+              <p class="preview-notice">
+                保留可取得的樣式；來源腳本、外部圖片與字型不執行或載入。
+              </p>
               <div class="preview-stage">
                 <iframe
                   id="preview"
-                  title="可點選元素的安全靜態預覽"
+                  title="可選取元素的靜態網頁預覽"
                   sandbox="allow-same-origin"
                 ></iframe>
               </div>
-              <div id="selection-path" class="selection-path"></div>
+              <nav id="selection-path" aria-label="目前元素的祖先路徑"></nav>
             </div>
             <div id="source-view" hidden>
               <div class="source-toolbar">
-                <select id="source-file" aria-label="原始碼檔案"></select
-                ><button id="node-source">選取元素片段</button
-                ><button id="format-source">排版</button><button id="raw-source">原檔</button
-                ><button id="copy-source">複製</button>
+                <button id="raw-source">原始 HTML</button
+                ><button id="node-source">元素片段</button
+                ><button id="copy-source">複製</button
+                ><button id="download-html">下載 HTML</button>
               </div>
               <p id="source-meta" class="muted"></p>
-              <pre id="source-code" tabindex="0" aria-label="原始碼內容"></pre>
+              <pre id="source-code" tabindex="0" aria-label="HTML 原始碼"></pre>
             </div>
           </section>
-          <aside class="inspector">
-            <div class="panel-title"><h2 id="selected-node">選取元素</h2></div>
-            <div class="inspect-tabs"><button data-inspect="css" class="active">CSS 結構</button></div>
+          <aside class="card inspector">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">04 / ELEMENT</p>
+                <h2>元素資訊</h2>
+              </div>
+            </div>
+            <p id="selected-node" class="selected-node">尚未選取元素</p>
             <div id="inspect-content"></div>
           </aside>
         </div>
       </section>
-      <section id="empty-state">
-        <div class="empty-diagram" aria-hidden="true">
-          <span>&lt;main&gt;</span><i></i>
-          <div><span>&lt;nav&gt;</span><span>&lt;section&gt;</span></div>
-        </div>
-        <h2>每一個畫面，都有可以讀懂的結構。</h2>
-        <p>從自己的作品開始，點選元素，找出它的排版與互動方式。</p>
-        <button id="empty-demo" class="primary">執行網頁預覽</button>
-        <div class="empty-topics">
-          <span><b>HTML</b> 元素與層級</span><span><b>CSS</b> 樣式與排版</span
-          ><span><b>JS</b> 事件與函式</span>
-        </div>
-        <p class="muted">
-          適合分析自己的作品或公開頁面的原始碼。需要登入、阻擋存取或主要由 JavaScript
-          生成的內容，可能無法完整取得。
-        </p>
-      </section>
+      <footer>HTML 結構工作台 · 來源檔案僅供分析，不會被執行或改寫。</footer>
     </main>
   </body>
 </html>

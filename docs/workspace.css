@@ -777,3 +777,48 @@ footer {
     outline: 1px solid #b8eac7;
   }
 }
+
+/* A desktop viewport scaled inside the existing preview card. */
+.preview-scale-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 10px 0;
+}
+.preview-scale-tools button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+#preview-scale-label {
+  color: #bed6c5;
+  font: 11px var(--mono);
+  min-width: 165px;
+  text-align: center;
+}
+.preview-stage {
+  display: block;
+  position: relative;
+  padding: 12px;
+  overscroll-behavior: contain;
+}
+#preview-space {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: auto;
+  width: 1440px;
+  height: 900px;
+  background: white;
+  box-shadow: 0 8px 25px #0005;
+}
+#preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 900px;
+  min-height: 0;
+  transform-origin: top left;
+}

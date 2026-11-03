@@ -61,11 +61,89 @@
   }
   function showView(next) {
     view = next;
+    if (next === "preview") requestAnimationFrame(() => sizePreview());
     $("#preview-view").hidden = next !== "preview";
     $("#source-view").hidden = next !== "source";
     for (const b of document.querySelectorAll("[data-view]"))
       b.classList.toggle("active", b.dataset.view === next);
   }
+  // The iframe keeps its own device dimensions. Scaling never changes its CSS media viewport.
+  const previewStage = $(".preview-stage"),
+    previewSpace = $("#preview-space");
+  let previewWidth = "1440",
+    previewScale = 1,
+    previewAutoFit = true,
+    previewResizeFrame = 0;
+  function previewDimensions() {
+    if (previewWidth === "full")
+      return {
+        width: Math.max(240, previewStage.clientWidth - 24),
+        height: Math.max(420, previewStage.clientHeight - 24),
+        name: "自適應",
+      };
+    const sizes = {
+      1440: { width: 1440, height: 900, name: "桌面" },
+      768: { width: 768, height: 1024, name: "平板" },
+      375: { width: 375, height: 812, name: "手機" },
+    };
+    return sizes[previewWidth];
+  }
+  function sizePreview() {
+    if (previewStage.clientWidth < 1 || previewStage.clientHeight < 1) return;
+    const device = previewDimensions(),
+      width = previewStage.clientWidth - 24,
+      height = previewStage.clientHeight - 24;
+    if (previewAutoFit)
+      previewScale = Math.max(
+        0.05,
+        Math.min(1, width / device.width, height / device.height),
+      );
+    const frame = $("#preview");
+    frame.style.width = device.width + "px";
+    frame.style.height = device.height + "px";
+    frame.style.transform = "scale(" + previewScale + ")";
+    previewSpace.style.width = Math.floor(device.width * previewScale) + "px";
+    previewSpace.style.height = Math.floor(device.height * previewScale) + "px";
+    previewSpace.style.marginTop = previewAutoFit
+      ? Math.max(0, Math.floor((height - device.height * previewScale) / 2)) +
+        "px"
+      : "0px";
+    $("#preview-scale-label").textContent =
+      device.name +
+      " " +
+      device.width +
+      " × " +
+      device.height +
+      " · " +
+      Math.round(previewScale * 100) +
+      "%";
+    $("#preview-fit").setAttribute("aria-pressed", String(previewAutoFit));
+    $("#preview-actual").setAttribute(
+      "aria-pressed",
+      String(!previewAutoFit && Math.abs(previewScale - 1) < 0.001),
+    );
+    $("#preview-zoom-out").disabled = previewScale <= 0.05;
+    $("#preview-zoom-in").disabled = previewScale >= 2;
+  }
+  function schedulePreview() {
+    cancelAnimationFrame(previewResizeFrame);
+    previewResizeFrame = requestAnimationFrame(sizePreview);
+  }
+  function zoomPreview(value) {
+    previewAutoFit = false;
+    previewScale = Math.max(0.05, Math.min(2, value));
+    sizePreview();
+  }
+  $("#preview-fit").onclick = () => {
+    previewAutoFit = true;
+    sizePreview();
+    previewStage.scrollTop = 0;
+    previewStage.scrollLeft = 0;
+  };
+  $("#preview-zoom-in").onclick = () => zoomPreview(previewScale + 0.1);
+  $("#preview-zoom-out").onclick = () => zoomPreview(previewScale - 0.1);
+  $("#preview-actual").onclick = () => zoomPreview(1);
+  new ResizeObserver(schedulePreview).observe(previewStage);
   function previewElement() {
     try {
       return $("#preview").contentDocument?.querySelector(
@@ -175,6 +253,28 @@
       )
         target.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
+    if (target && scrollPreview)
+      requestAnimationFrame(() => {
+        const r = target.getBoundingClientRect(),
+          frame = $("#preview").getBoundingClientRect(),
+          stage = previewStage.getBoundingClientRect();
+        const left = frame.left + r.left * previewScale,
+          right = frame.left + r.right * previewScale,
+          top = frame.top + r.top * previewScale,
+          bottom = frame.top + r.bottom * previewScale;
+        if (left < stage.left || right > stage.right)
+          previewStage.scrollLeft +=
+            left -
+            stage.left -
+            previewStage.clientWidth / 2 +
+            Math.min(r.width * previewScale, previewStage.clientWidth) / 2;
+        if (top < stage.top || bottom > stage.bottom)
+          previewStage.scrollTop +=
+            top -
+            stage.top -
+            previewStage.clientHeight / 2 +
+            Math.min(r.height * previewScale, previewStage.clientHeight) / 2;
+      });
     const path = [];
     for (let n = nodes.get(selected); n; n = nodes.get(n.parent))
       path.unshift(n);
@@ -461,6 +561,7 @@
     });
     doc.addEventListener("submit", (e) => e.preventDefault());
     markSelection();
+    schedulePreview();
   });
   for (const b of document.querySelectorAll("[data-mode]"))
     b.onclick = () => setMode(b.dataset.mode);
@@ -469,10 +570,13 @@
       b.dataset.view === "source" ? openSource("html") : showView("preview");
   for (const b of document.querySelectorAll("[data-width]"))
     b.onclick = () => {
-      $("#preview").style.width =
-        b.dataset.width === "full" ? "100%" : b.dataset.width + "px";
+      previewWidth = b.dataset.width;
+      previewAutoFit = true;
       for (const t of document.querySelectorAll("[data-width]"))
         t.setAttribute("aria-pressed", String(t === b));
+      sizePreview();
+      previewStage.scrollLeft = 0;
+      previewStage.scrollTop = 0;
     };
   $("#analyze-form").onsubmit = (e) => {
     e.preventDefault();

@@ -4,14 +4,32 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>網頁分析器 · HTML 結構工作台</title>
-    <link rel="stylesheet" href="/static/workspace.css?v=20261103-html9" />
-    <script src="/static/source-utils.js?v=20261103-html9" defer></script>
-    <script src="/static/source-code-view.js?v=20261103-html9" defer></script>
-    <script src="/static/project-core.js?v=20261103-html9" defer></script>
-    <script src="/static/project-page.js?v=20261103-html9" defer></script>
-    <script src="/static/static-analyzer.js?v=20261103-html9" defer></script>
-    <script src="/static/app.js?v=20261103-html9" defer></script>
-    <script src="/static/project-ui.js?v=20261103-html9" defer></script>
+    <link
+      rel="stylesheet"
+      href="/static/workspace.css?v=20261103-cardpreview10"
+    />
+    <script
+      src="/static/source-utils.js?v=20261103-cardpreview10"
+      defer
+    ></script>
+    <script
+      src="/static/source-code-view.js?v=20261103-cardpreview10"
+      defer
+    ></script>
+    <script
+      src="/static/project-core.js?v=20261103-cardpreview10"
+      defer
+    ></script>
+    <script
+      src="/static/project-page.js?v=20261103-cardpreview10"
+      defer
+    ></script>
+    <script
+      src="/static/static-analyzer.js?v=20261103-cardpreview10"
+      defer
+    ></script>
+    <script src="/static/app.js?v=20261103-cardpreview10" defer></script>
+    <script src="/static/project-ui.js?v=20261103-cardpreview10" defer></script>
   </head>
   <body data-runtime="local">
     <header class="topbar">
@@ -200,7 +218,13 @@
                 <h2>網頁預覽</h2>
               </div>
               <div class="width-tabs">
-                <button data-width="full" aria-pressed="true">自適應</button
+                <button
+                  data-width="1440"
+                  aria-pressed="true"
+                  title="桌面 1440 × 900"
+                >
+                  桌面</button
+                ><button data-width="full" aria-pressed="false">自適應</button
                 ><button data-width="768" aria-pressed="false">平板</button
                 ><button data-width="375" aria-pressed="false">手機</button>
               </div>
@@ -213,12 +237,45 @@
               <p class="preview-notice">
                 保留可取得的樣式；來源腳本、外部圖片與字型不執行或載入。
               </p>
-              <div class="preview-stage">
-                <iframe
-                  id="preview"
-                  title="可選取元素的靜態網頁預覽"
-                  sandbox="allow-same-origin"
-                ></iframe>
+              <div
+                class="preview-scale-tools"
+                role="group"
+                aria-label="卡片內的預覽縮放"
+              >
+                <button id="preview-fit" type="button" aria-pressed="true">
+                  適合卡片
+                </button>
+                <button
+                  id="preview-zoom-out"
+                  type="button"
+                  aria-label="縮小網頁預覽"
+                >
+                  −
+                </button>
+                <output id="preview-scale-label" aria-live="polite"
+                  >桌面 1440 × 900</output
+                >
+                <button
+                  id="preview-zoom-in"
+                  type="button"
+                  aria-label="放大網頁預覽"
+                >
+                  ＋
+                </button>
+                <button id="preview-actual" type="button">100%</button>
+              </div>
+              <div
+                class="preview-stage"
+                tabindex="0"
+                aria-label="桌面網頁預覽，可捲動瀏覽放大內容"
+              >
+                <div id="preview-space">
+                  <iframe
+                    id="preview"
+                    title="可選取元素的靜態網頁預覽"
+                    sandbox="allow-same-origin"
+                  ></iframe>
+                </div>
               </div>
               <nav id="selection-path" aria-label="目前元素的祖先路徑"></nav>
             </div>

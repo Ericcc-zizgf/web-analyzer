@@ -101,10 +101,9 @@ window.CSSLab = (() => {
     return 0;
   };
   function candidates(element, ctx, key) {
-    const scratch = document.createElement("div").style;
-    const result = [];
-    ctx.report.css_rules.forEach((rule, index) => {
-      scratch.cssText = rule.declarations
+    ctx._declarations ||= ctx.report.css_rules.map((rule, index) => {
+      const style = document.createElement("div").style;
+      style.cssText = rule.declarations
         .map(
           (d) =>
             d.property +
@@ -114,49 +113,62 @@ window.CSSLab = (() => {
             ";",
         )
         .join("");
-      const value = scratch.getPropertyValue(key),
-        reset = scratch.getPropertyValue("all");
-      if (!value && !reset) return;
-      const matches = [];
-      for (const selector of splitSelectors(rule.selector)) {
-        try {
-          if (element.matches(selector.trim()))
-            matches.push(specificity(selector.trim()));
-        } catch {}
-      }
-      if (!matches.length) return;
-      const state = ctx.conditionState(rule, ctx.win);
-      const complex =
-        matches.some((x) => !x) ||
-        rule.conditions.some((c) => !["media", "supports"].includes(c.type)) ||
-        Boolean(reset);
-      const spec = complex ? null : matches.sort(compare).at(-1);
-      result.push({
-        selector: rule.selector,
-        value: value || "all: " + reset,
-        important: scratch.getPropertyPriority(key) === "important",
-        spec,
-        index,
-        state,
-        complex,
-        file: rule.file,
-        line: rule.line,
-      });
+      return { rule, index, style };
     });
-    scratch.cssText = element.getAttribute("style") || "";
-    const value = scratch.getPropertyValue(key),
-      reset = scratch.getPropertyValue("all");
+    ctx._matches ||= new WeakMap();
+    if (!ctx._matches.has(element)) {
+      const found = [];
+      for (const item of ctx._declarations) {
+        const matches = [];
+        for (const selector of splitSelectors(item.rule.selector))
+          try {
+            if (element.matches(selector.trim()))
+              matches.push(specificity(selector.trim()));
+          } catch {}
+        if (!matches.length) continue;
+        const complex =
+          matches.some((x) => !x) ||
+          item.rule.conditions.some(
+            (c) => !["media", "supports"].includes(c.type),
+          );
+        found.push({
+          ...item,
+          spec: complex ? null : matches.sort(compare).at(-1),
+          complex,
+          state: ctx.conditionState(item.rule, ctx.win),
+        });
+      }
+      ctx._matches.set(element, found);
+    }
+    const result = [];
+    for (const item of ctx._matches.get(element)) {
+      const value = item.style.getPropertyValue(key),
+        reset = item.style.getPropertyValue("all");
+      if (!value && !reset) continue;
+      result.push({
+        selector: item.rule.selector,
+        value: value || "all: " + reset,
+        important: item.style.getPropertyPriority(key) === "important",
+        spec: item.spec,
+        index: item.index,
+        state: item.state,
+        complex: item.complex || !!reset,
+        file: item.rule.file,
+        line: item.rule.line,
+      });
+    }
+    const style = element.style,
+      value = style.getPropertyValue(key),
+      reset = style.getPropertyValue("all");
     if (value || reset)
       result.push({
-        selector: edits.has(element.dataset.webAnalyzerNode)
-          ? "行內 style（含練習修改）"
-          : "元素行內 style",
+        selector: "元素行內 style／預覽修改",
         value: value || "all: " + reset,
-        important: scratch.getPropertyPriority(key) === "important",
+        important: style.getPropertyPriority(key) === "important",
         spec: [1, 0, 0, 0],
         index: Infinity,
         state: "條件符合",
-        complex: Boolean(reset),
+        complex: !!reset,
         inline: true,
       });
     return result;
@@ -265,6 +277,25 @@ window.CSSLab = (() => {
         "muted",
       ),
     );
+    const readingMode = window.AnalysisScope.mode();
+    const propertyScope = make("select");
+    propertyScope.setAttribute("aria-label", "CSS 參數閱讀範圍");
+    for (const [v, t] of [
+      ["primary", "主要排版參數"],
+      ["declared", "有宣告的參數"],
+      ["all", "全部參數"],
+    ]) {
+      const o = make("option", t);
+      o.value = v;
+      propertyScope.append(o);
+    }
+    propertyScope.value =
+      readingMode === "overview"
+        ? "primary"
+        : readingMode === "trace"
+          ? "declared"
+          : "all";
+    const scopeCount = make("small", "", "muted");
     const groups = [];
     const toggleAll = button("全部展開", () => {
       const open = groups.some((g) => !g.open);
@@ -296,6 +327,7 @@ window.CSSLab = (() => {
       changesList = make("div");
     changesPanel.append(changesList);
     tools.append(
+      propertyScope,
       undoButton,
       redoButton,
       compareButton,
@@ -331,15 +363,51 @@ window.CSSLab = (() => {
       }
       if (!state.count)
         changesList.append(make("p", "尚未修改任何 CSS。", "muted"));
+      const primary = new Set([
+        "width",
+        "height",
+        "display",
+        "position",
+        "box-sizing",
+        "margin-top",
+        "margin-right",
+        "margin-bottom",
+        "margin-left",
+        "padding-top",
+        "padding-right",
+        "padding-bottom",
+        "padding-left",
+        "flex-direction",
+        "justify-content",
+        "align-items",
+        "row-gap",
+        "column-gap",
+        "grid-template-columns",
+        "grid-template-rows",
+        "align-self",
+        "flex-basis",
+      ]);
+      let visible = 0;
       for (const row of rows) {
-        const base = make("div").style;
-        base.cssText = session.originalStyle(row.target) || "";
         const edited = session.isModified(row.target, row.key);
-        row.row.hidden = changedOnly && !edited;
+        const relevant =
+          propertyScope.value === "all" ||
+          edited ||
+          (propertyScope.value === "primary"
+            ? primary.has(row.key)
+            : row.authored);
+        row.row.hidden = !relevant || (changedOnly && !edited);
+        if (!row.row.hidden) visible++;
         row.row.classList.toggle("is-modified", edited);
         for (const c of row.row.querySelectorAll("input,select,button"))
           c.disabled = state.comparing;
       }
+      scopeCount.textContent =
+        "顯示 " +
+        visible +
+        "／" +
+        rows.length +
+        " 個欄位；其他欄位可切換範圍展開。";
     }
     only.onchange = () => {
       changedOnly = only.checked;
@@ -349,6 +417,8 @@ window.CSSLab = (() => {
       update();
       refreshSession();
     });
+    heading.append(propertyScope, scopeCount);
+    propertyScope.onchange = refreshSession;
     box.append(heading);
     function group(title, id, open) {
       const g = section(title, id, structureOpen.get(id) ?? open);
@@ -732,9 +802,69 @@ window.CSSLab = (() => {
         controls.append(label, unit, restore);
         row.append(controls, extras, source, current, feedback);
         container.append(row);
-        rows.push({ target, key, current, row });
+        rows.push({ target, key, current, row, authored: !!authored });
       }
     }
+    const essentials = make("section", undefined, "css-essentials");
+    const title = make("h4", "目前元素的主要樣式與來源");
+    essentials.append(title);
+    for (const key of [
+      "display",
+      "position",
+      "width",
+      "height",
+      "margin-left",
+      "margin-top",
+      "color",
+    ]) {
+      const matched = candidates(element, ctx, key).filter(
+        (c) => c.state === "條件符合",
+      );
+      matched.sort(
+        (a, b) =>
+          Number(a.important) - Number(b.important) ||
+          compare(a.spec || [0, 0, 0, 0], b.spec || [0, 0, 0, 0]) ||
+          a.index - b.index,
+      );
+      const top = matched.at(-1),
+        line = make("div", undefined, "css-essential-row");
+      line.append(make("code", key + ": " + computed().getPropertyValue(key)));
+      if (top) {
+        const file = ctx.report.files.find(
+          (f) => f.id === top.file || f.label === top.file,
+        );
+        const fileName = file?.label || top.file;
+        const shared = fileName ? window.AnalysisScope.users(fileName) : [];
+        line.append(
+          make(
+            "small",
+            (top.complex ? "來源待確認：" : "宣告線索：") +
+              top.selector +
+              " → " +
+              top.value +
+              (shared.length > 1 ? " · 共用於 " + shared.length + " 頁" : ""),
+          ),
+        );
+        if (top.file)
+          line.append(
+            button((fileName || "來源") + ":" + top.line, () =>
+              ctx.openSource(top.file, top.line),
+            ),
+          );
+      } else
+        line.append(
+          make("small", "未找到直接宣告；可能為繼承、預設或自動排版。"),
+        );
+      essentials.append(line);
+    }
+    essentials.append(
+      make(
+        "p",
+        "運算值由瀏覽器回報；宣告線索不是複雜 cascade 的唯一勝出證明。被覆蓋、其他條件與完整規則可在詳細區追查。",
+        "muted",
+      ),
+    );
+    box.append(essentials);
     fields(group("基本尺寸與盒模型", "css-basic-fields", true), element, [
       "width",
       "height",
@@ -744,12 +874,11 @@ window.CSSLab = (() => {
       "max-height",
       "box-sizing",
     ]);
-    fields(group("外距 margin", "css-margin-fields", true), element, [
-      "margin-top",
-      "margin-right",
-      "margin-bottom",
-      "margin-left",
-    ]);
+    fields(
+      group("外距 margin", "css-margin-fields", readingMode !== "overview"),
+      element,
+      ["margin-top", "margin-right", "margin-bottom", "margin-left"],
+    );
     fields(group("內距 padding", "css-padding-fields", false), element, [
       "padding-top",
       "padding-right",
@@ -787,6 +916,7 @@ window.CSSLab = (() => {
       model = group("上一層模型：為什麼元素在這裡？", "css-parent-model", true),
       explanation = make("p", "", "info-box");
     model.append(explanation);
+    box.insertBefore(model, essentials);
     function explain() {
       const own = computed(),
         r = element.getBoundingClientRect();

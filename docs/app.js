@@ -151,6 +151,46 @@ function label(node) {
       : "")
   );
 }
+const scriptAnalysisCache = new Map();
+let scriptCacheBytes = 0;
+async function analyzeScriptsCached(scripts) {
+  const available = new Map();
+  for (const f of scripts)
+    if (scriptAnalysisCache.has(f.source))
+      available.set(f.source, scriptAnalysisCache.get(f.source));
+  const missing = scripts.filter((f) => !available.has(f.source));
+  if (missing.length) {
+    const parsed = await workerCall("analyze", {
+      files: missing.map((f) => ({
+        id: f.id,
+        source: f.source,
+        label: f.label,
+      })),
+    });
+    for (const item of parsed) {
+      const file = missing.find((f) => f.id === item.id);
+      if (!file) continue;
+      available.set(file.source, structuredClone(item));
+      if (file.source.length > 2000000) continue;
+      const previous = scriptAnalysisCache.get(file.source);
+      if (previous) scriptCacheBytes -= file.source.length;
+      scriptAnalysisCache.set(file.source, structuredClone(item));
+      scriptCacheBytes += file.source.length;
+    }
+    while (scriptAnalysisCache.size > 24 || scriptCacheBytes > 6000000) {
+      const first = scriptAnalysisCache.keys().next().value;
+      if (first === undefined) break;
+      scriptCacheBytes -= first.length;
+      scriptAnalysisCache.delete(first);
+    }
+  }
+  return scripts
+    .map((f) => {
+      const item = available.get(f.source);
+      return item ? { ...structuredClone(item), id: f.id } : null;
+    })
+    .filter(Boolean);
+}
 async function analyze(projectInput = null) {
   const run = ++runSerial;
   if (projectInput) {
@@ -216,6 +256,7 @@ async function analyze(projectInput = null) {
     $("#count-css").textContent = report.stats.css_rules;
     $("#count-functions").textContent = "…";
     $("#count-events").textContent = report.inline_events.length;
+    window.AnalysisScope.setPage(report);
     fillSources();
     renderWarnings();
     renderTree();
@@ -594,7 +635,25 @@ function renderCSS(box, node) {
   check.type = "checkbox";
   check.checked = true;
   filter.append(check, document.createTextNode("只看與選取元素相符的規則"));
-  box.append(filter);
+  const conditions = el("select");
+  conditions.setAttribute("aria-label", "CSS 規則條件範圍");
+  for (const [v, t] of [
+    ["active", "目前條件符合"],
+    ["inactive", "其他條件／需判斷"],
+    ["all", "全部條件"],
+  ]) {
+    const o = el("option", t);
+    o.value = v;
+    conditions.append(o);
+  }
+  conditions.value =
+    window.AnalysisScope.mode() === "detail" ? "all" : "active";
+  let ruleLimit = window.AnalysisScope.config().rules;
+  const more = btn("再顯示規則", () => {
+    ruleLimit += window.AnalysisScope.config().rules;
+    draw();
+  });
+  box.append(filter, conditions);
   const area = el("div");
   box.append(area);
   if (node.attrs.style) {
@@ -625,6 +684,9 @@ function renderCSS(box, node) {
   function draw() {
     area.replaceChildren();
     let chosen = report.css_rules.filter((rule) => {
+      const state = conditionState(rule, win);
+      if (conditions.value === "active" && state !== "條件符合") return false;
+      if (conditions.value === "inactive" && state === "條件符合") return false;
       if (!check.checked) return true;
       if (!element) return false;
       try {
@@ -645,7 +707,16 @@ function renderCSS(box, node) {
       area.append(
         el("p", "偽元素及 :hover 等狀態可能不在這份相符清單。", "muted"),
       );
-    for (const rule of chosen.slice(0, 70)) {
+    more.hidden = chosen.length <= ruleLimit;
+    more.textContent =
+      "再顯示 " +
+      window.AnalysisScope.config().rules +
+      " 條（目前 " +
+      Math.min(ruleLimit, chosen.length) +
+      "／" +
+      chosen.length +
+      "）";
+    for (const rule of chosen.slice(0, ruleLimit)) {
       const state = conditionState(rule, win),
         card = el(
           "div",
@@ -687,11 +758,22 @@ function renderCSS(box, node) {
       );
       area.append(card);
     }
-    if (chosen.length > 70)
+    if (chosen.length > ruleLimit)
       area.append(
-        el("p", "目前顯示前 70 條，可到原始碼查看完整內容。", "muted"),
+        el(
+          "p",
+          "其餘 " +
+            (chosen.length - ruleLimit) +
+            " 條已收合，可按下方按鈕逐批顯示。",
+          "muted",
+        ),
       );
   }
+  conditions.onchange = () => {
+    ruleLimit = window.AnalysisScope.config().rules;
+    draw();
+  };
+  box.append(more);
   check.onchange = draw;
   draw();
 }
@@ -1187,6 +1269,9 @@ new ResizeObserver(() => {
 }).observe($("#preview"));
 
 // Share the folder snapshot with the existing page workbench.
+window.addEventListener("analysis:scope", () => {
+  if (report && inspectTab === "css") renderInspector();
+});
 window.addEventListener("css-session:change", (e) => {
   if (
     e.detail.kind !== "edit" &&

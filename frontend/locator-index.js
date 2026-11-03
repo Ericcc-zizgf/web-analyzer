@@ -42,7 +42,10 @@ window.LocatorIndex = (() => {
           if (type === "build") {
             worker?.terminate();
             worker = null;
-            state = { phase: "error", message: "位置索引逾時，並未完成全部檔案。" };
+            state = {
+              phase: "error",
+              message: "位置索引逾時，並未完成全部檔案。",
+            };
             notify();
           }
         },
@@ -120,8 +123,18 @@ window.LocatorIndex = (() => {
   function setProject(sources, report) {
     clear();
     project = report;
-    files = new Map([...sources].filter(([, source]) => typeof source === "string"));
-    start();
+    files = new Map(
+      [...sources].filter(([, source]) => typeof source === "string"),
+    );
+    state = {
+      phase: "waiting",
+      message: "專案文字快照已備妥；開啟元件追查時才建立語法索引。",
+    };
+    notify();
+  }
+  function ensureIndex() {
+    if (!worker && files.size) start();
+    return ready;
   }
   function setPage(report) {
     // Browser reports retain exact marker offsets. Backends may only map unique unchanged start tags.
@@ -151,21 +164,31 @@ window.LocatorIndex = (() => {
     for (const f of report.files)
       if (f.loaded && !f.inline && typeof f.source === "string")
         files.set(f.label, f.source);
-    start();
+    state = {
+      phase: "waiting",
+      message: "本頁來源已備妥；開始追查時才建立語法索引。",
+    };
+    notify();
   }
   function active(report) {
     const set = new Set([report.source_label]);
     for (const f of report.files)
-      if (f.loaded && !f.inline && !(f.kind === "css" && f.dependency)) set.add(f.label);
+      if (f.loaded && !f.inline && !(f.kind === "css" && f.dependency))
+        set.add(f.label);
     // Expand only literal CSS imports. Other files stay possible, even when selectors happen to match.
     let changed = true;
     for (let pass = 0; changed && pass < 20; pass++) {
       changed = false;
       for (const path of [...set])
         if (/\.css$/i.test(path)) {
-          for (const item of window.SourceUtils.cssImports(files.get(path) || "")) {
+          for (const item of window.SourceUtils.cssImports(
+            files.get(path) || "",
+          )) {
             try {
-              const u = new URL(item.reference, "https://project.invalid/" + path);
+              const u = new URL(
+                item.reference,
+                "https://project.invalid/" + path,
+              );
               const target = decodeURIComponent(u.pathname).replace(/^\//, "");
               if (
                 u.origin === "https://project.invalid" &&
@@ -184,7 +207,8 @@ window.LocatorIndex = (() => {
   function match(element, selector) {
     try {
       return Boolean(
-        element && (element.matches(selector) || element.querySelector(selector)),
+        element &&
+          (element.matches(selector) || element.querySelector(selector)),
       );
     } catch {
       return false;
@@ -192,7 +216,7 @@ window.LocatorIndex = (() => {
   }
   async function locate(context, includeChildren = true, seedIDs = []) {
     const generation = serial;
-    await ready;
+    await ensureIndex();
     if (generation !== serial) throw Error("來源已切換");
     if (!metadata) throw Error("位置索引尚未完成");
     const { report, node, descendants, element } = context;
@@ -200,11 +224,14 @@ window.LocatorIndex = (() => {
       tokens = new Set();
     for (const n of targets) {
       if (n.attrs.id) tokens.add(n.attrs.id);
-      for (const c of String(n.attrs.class || "").split(/\s+/)) if (c) tokens.add(c);
+      for (const c of String(n.attrs.class || "").split(/\s+/))
+        if (c) tokens.add(c);
     }
     const selection = {
       file: report.source_label,
-      htmlStarts: targets.flatMap((n) => (n.location ? [n.location.start] : [])),
+      htmlStarts: targets.flatMap((n) =>
+        n.location ? [n.location.start] : [],
+      ),
       activeFiles: active(report),
       tokens: [...tokens],
       cssMatches: [],
@@ -215,7 +242,8 @@ window.LocatorIndex = (() => {
       seedIDs,
     };
     const ancestors = [];
-    for (let p = element?.parentElement; p; p = p.parentElement) ancestors.push(p);
+    for (let p = element?.parentElement; p; p = p.parentElement)
+      ancestors.push(p);
     for (const r of metadata.records) {
       if (r.type === "css") {
         if (
@@ -283,7 +311,9 @@ window.LocatorIndex = (() => {
     if (generation !== serial) throw Error("來源已切換");
     const fallbackFiles = new Set(
       metadata.gaps
-        .filter((g) => /未建立語法|單檔元件|解析失敗|截斷|未索引/.test(g.reason))
+        .filter((g) =>
+          /未建立語法|單檔元件|解析失敗|截斷|未索引/.test(g.reason),
+        )
         .map((g) => g.file),
     );
     let fallbackCount = 0,
@@ -291,13 +321,17 @@ window.LocatorIndex = (() => {
     for (const [file, source] of files)
       if (fallbackFiles.has(file)) {
         const lines = [0];
-        for (let i = 0; i < source.length; i++) if (source[i] === "\n") lines.push(i + 1);
+        for (let i = 0; i < source.length; i++)
+          if (source[i] === "\n") lines.push(i + 1);
         for (const token of [...tokens].slice(0, 50)) {
           let at = 0;
           while ((at = source.indexOf(token, at)) >= 0) {
             const start = at;
             at += Math.max(1, token.length);
-            if (/[\w-]/.test(source[start - 1] || "") || /[\w-]/.test(source[at] || ""))
+            if (
+              /[\w-]/.test(source[start - 1] || "") ||
+              /[\w-]/.test(source[at] || "")
+            )
               continue;
             if (fallbackCount++ >= 500) {
               fallbackCapped = true;
@@ -321,7 +355,9 @@ window.LocatorIndex = (() => {
               column: start - lines[lo] + 1,
               endLine: lo + 1,
               certainty: "possible",
-              reasons: ["未完整解析檔案中的同名文字，可能包含註解或範例；不推定框架關聯"],
+              reasons: [
+                "未完整解析檔案中的同名文字，可能包含註解或範例；不推定框架關聯",
+              ],
             });
           }
           if (fallbackCapped) break;
@@ -340,7 +376,8 @@ window.LocatorIndex = (() => {
           file: f.path,
           reason:
             "未建立文字索引：" +
-            (f.diagnostics?.join("；") || "非文字檔或無法讀取，只保留檔名與大小"),
+            (f.diagnostics?.join("；") ||
+              "非文字檔或無法讀取，只保留檔名與大小"),
         });
     const skipped = project?.skipped || [];
     result.gaps = [
@@ -390,7 +427,8 @@ window.LocatorIndex = (() => {
       }
       let offset = 0;
       const lines = [0];
-      for (let i = 0; i < source.length; i++) if (source[i] === "\n") lines.push(i + 1);
+      for (let i = 0; i < source.length; i++)
+        if (source[i] === "\n") lines.push(i + 1);
       while ((offset = source.indexOf(term, offset)) >= 0) {
         total++;
         if (results.length < 500) {

@@ -46,7 +46,7 @@
     $("#project-page-reason").textContent = profile
       ? "頁面線索：" +
         profile.reasons.join("、") +
-        "。入口是靜態推測；其餘 HTML 也會一併分析。"
+        "。目前只分析此頁；其他頁面可從頁面地圖切換。"
       : "";
     $("#project-page-link").hidden = true;
     $("#project-page-status").textContent =
@@ -62,7 +62,9 @@
     });
     if (serial !== state.pageSerial || projectSerial !== state.serial) return;
     $("#project-page-status").textContent = ok
-      ? "已分析「" + path + "」，下方可直接查看畫面、HTML 結構、CSS 與 JavaScript。"
+      ? "已分析「" +
+        path +
+        "」，下方可直接查看畫面、HTML 結構、CSS 與 JavaScript。"
       : "這個頁面未完成分析：" + window.PageWorkbench.lastStatus();
     $("#project-page-link").hidden = !ok;
   }
@@ -77,7 +79,10 @@
     table.replaceChildren();
     const rows = new Map();
     state.pageResults = new Map();
-    report.page_analysis = profiles.map((profile) => ({ ...profile, status: "pending" }));
+    report.page_analysis = profiles.map((profile) => ({
+      ...profile,
+      status: "pending",
+    }));
     $("#project-pages-overview").hidden = !profiles.length;
     $("#project-pages-cancel").hidden = false;
     for (const profile of profiles) {
@@ -132,7 +137,8 @@
             ? `完成，缺少 ${result.missing.length} 個資源`
             : "完成";
     }
-    if (projectSerial !== state.serial || state.batchController !== batch) return;
+    if (projectSerial !== state.serial || state.batchController !== batch)
+      return;
     if (batch.signal.aborted) {
       for (const page of report.page_analysis)
         if (page.status === "pending") {
@@ -142,7 +148,9 @@
     }
     $("#project-pages-status").textContent =
       `共找到 ${profiles.length} 個 HTML，已完成 ${completed} 個、失敗 ${failed} 個` +
-      (batch.signal.aborted ? "，其餘已取消。" : "。不需要指定 index.html 或逐頁上傳。");
+      (batch.signal.aborted
+        ? "，其餘已取消。"
+        : "。不需要指定 index.html 或逐頁上傳。");
     $("#project-pages-cancel").hidden = true;
     state.batchController = null;
   }
@@ -171,7 +179,9 @@
     state.selected = path;
     document
       .querySelectorAll("#project-tree button")
-      .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.path === path)));
+      .forEach((b) =>
+        b.setAttribute("aria-pressed", String(b.dataset.path === path)),
+      );
     const panel = $("#project-detail");
     panel.replaceChildren();
     panel.append(
@@ -203,7 +213,9 @@
     );
     section(
       "函式與方法",
-      file.functions.map((f) => `L${f.line}：${f.async ? "async " : ""}${f.name}()`),
+      file.functions.map(
+        (f) => `L${f.line}：${f.async ? "async " : ""}${f.name}()`,
+      ),
     );
     if (file.exports.length)
       section(
@@ -258,7 +270,9 @@
     const tree = $("#project-tree");
     tree.replaceChildren();
     const directories = new Map([["", tree]]);
-    for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+    for (const file of [...files].sort((a, b) =>
+      a.path.localeCompare(b.path),
+    )) {
       const parts = file.path.split("/");
       let parent = "",
         container = tree;
@@ -313,7 +327,9 @@
       start.append(b);
     }
     if (!r.entries.length)
-      start.append(node("span", "尚未辨識入口，可從 README 或 package.json 開始。"));
+      start.append(
+        node("span", "尚未辨識入口，可從 README 或 package.json 開始。"),
+      );
     overview.append(start);
     const notices = $("#project-notices");
     notices.replaceChildren();
@@ -321,10 +337,15 @@
     const missing = r.links.filter((l) => l.status === "missing");
     if (missing.length)
       notices.append(
-        node("li", `${missing.length} 個相對引用找不到檔案，請點選各檔案查看路徑。`),
+        node(
+          "li",
+          `${missing.length} 個相對引用找不到檔案，請點選各檔案查看路徑。`,
+        ),
       );
     const details = $("#project-skipped");
-    details.replaceChildren(node("summary", `略過檔案與原因 · ${r.skipped.length}`));
+    details.replaceChildren(
+      node("summary", `略過檔案與原因 · ${r.skipped.length}`),
+    );
     const ul = node("ul");
     for (const item of r.skipped.slice(0, 200))
       ul.append(node("li", item.path + "：" + item.reason));
@@ -339,13 +360,16 @@
         r.files[0]?.path,
     );
     state.pageProfiles = ProjectPage.profiles(r, state.sources);
+    window.AnalysisScope.setProject(r, state.pageProfiles);
     const pages = state.pageProfiles.map((page) => page.path);
     $("#project-page").replaceChildren(
       ...pages.map((path) => {
         const profile = state.pageProfiles.find((page) => page.path === path);
         const option = node(
           "option",
-          (profile?.title && profile.title !== path ? profile.title + " · " : "") + path,
+          (profile?.title && profile.title !== path
+            ? profile.title + " · "
+            : "") + path,
         );
         option.value = path;
         return option;
@@ -355,7 +379,10 @@
     $("#project-page-link").hidden = true;
     if (pages.length) {
       openPage(pages[0]);
-      scanAll(state.pageProfiles);
+      $("#project-pages-overview").hidden = false;
+      $("#project-pages-status").textContent =
+        "尚未掃描其他頁面；需要完整統計時再執行。";
+      $("#project-pages-body").replaceChildren();
     } else {
       $("#project-page-status").textContent =
         "專案中沒有可讀取的 HTML 頁面。目前已分析原始碼職責與模組；React／Vue 等動態畫面需先啟動或建置專案，無法只靠原始碼還原。";
@@ -436,6 +463,16 @@
       }
     }
   }
+  const scanButton = node("button", "手動掃描所有頁面");
+  scanButton.type = "button";
+  scanButton.onclick = () => {
+    if (state.pageProfiles.length) scanAll(state.pageProfiles);
+  };
+  $("#project-pages-status").before(scanButton);
+  window.addEventListener("analysis:open-file", (e) => {
+    if (state.report?.files.some((f) => f.path === e.detail))
+      showFile(e.detail);
+  });
   const scriptURL = document.currentScript.src;
   $("#project-folder").onchange = (e) => {
     if (e.target.files.length) run([...e.target.files]);
@@ -445,7 +482,8 @@
     status("已取消。重新選擇資料夾即可分析。");
   };
   $("#project-page").onchange = (e) => openPage(e.target.value);
-  $("#project-page-reanalyze").onclick = () => openPage($("#project-page").value);
+  $("#project-page-reanalyze").onclick = () =>
+    openPage($("#project-page").value);
   $("#project-pages-cancel").onclick = () => state.batchController?.abort();
   $("#project-search").oninput = () => {
     if (state.report) renderTree();
@@ -496,7 +534,13 @@
       "## 檔案引用",
       ...r.links.map(
         (l) =>
-          "- " + l.from + " → " + (l.target || l.reference) + "（" + relation(l) + "）",
+          "- " +
+          l.from +
+          " → " +
+          (l.target || l.reference) +
+          "（" +
+          relation(l) +
+          "）",
       ),
     );
     download(lines.join("\n"), "project-notes.md", "text/markdown");

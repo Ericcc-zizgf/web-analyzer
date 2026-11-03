@@ -200,6 +200,102 @@
   });
   pageTools.append(pageListButton, fileMapButton);
   pages.body.append(pageTools);
+  const pageMap = make("details", "page-resource-map");
+  pageMap.open = true;
+  const pageMapTitle = make("summary", "", "頁面與共用資源地圖");
+  const pageSearch = make("input");
+  pageSearch.type = "search";
+  pageSearch.placeholder = "搜尋頁面名稱、標題";
+  pageSearch.setAttribute("aria-label", "搜尋專案頁面");
+  const pageMapList = make("div", "page-map-list"),
+    resourceList = make("div", "page-resource-list");
+  let pageMapLimit = 12;
+  const pageMore = button("顯示更多頁面", "", () => {
+    pageMapLimit += 12;
+    renderPageMap();
+  });
+  pageMap.append(pageMapTitle, pageSearch, pageMapList, pageMore, resourceList);
+  pages.body.append(pageMap);
+  function renderPageMap() {
+    pageMapList.replaceChildren();
+    resourceList.replaceChildren();
+    const scope = window.AnalysisScope,
+      query = pageSearch.value.trim().toLowerCase(),
+      list = scope
+        .pages()
+        .filter((p) => (p.path + " " + p.title).toLowerCase().includes(query));
+    pageMapTitle.textContent = "頁面地圖 · " + scope.pages().length + " 頁";
+    for (const page of list.slice(0, pageMapLimit)) {
+      const resources = scope.resources(page.path),
+        shared = resources.filter((path) => scope.shared(path));
+      const entry = make("div", "page-map-entry"),
+        open = button(
+          (page.title || page.path) +
+            (scope.page() === page.path ? " · 目前頁面" : ""),
+          "",
+          () => {
+            const picker = $("#project-page");
+            picker.value = page.path;
+            picker.dispatchEvent(new Event("change"));
+          },
+        );
+      entry.append(
+        open,
+        make("code", "", page.path),
+        make(
+          "small",
+          "",
+          resources.length +
+            " 個樣式／腳本依賴，其中 " +
+            shared.length +
+            " 個為多頁共用",
+        ),
+      );
+      pageMapList.append(entry);
+    }
+    pageMore.hidden = list.length <= pageMapLimit;
+    const current = scope.page();
+    if (!current) return;
+    const details = make("details", "page-resources");
+    details.append(
+      make(
+        "summary",
+        "",
+        "目前頁面的 CSS／JS 來源 · " + scope.resources(current).length + " 個",
+      ),
+    );
+    for (const path of scope.resources(current)) {
+      const users = scope.users(path),
+        line = make("div", "page-resource-entry");
+      line.append(
+        button(path, "code", () => {
+          fileMapButton.click();
+          window.dispatchEvent(
+            new CustomEvent("analysis:open-file", { detail: path }),
+          );
+        }),
+        make(
+          "small",
+          "",
+          users.length > 1
+            ? "共用於 " + users.length + " 頁：" + users.join("、")
+            : "本頁專用（靜態引用）",
+        ),
+      );
+      details.append(line);
+    }
+    resourceList.append(details);
+  }
+  pageSearch.oninput = () => {
+    pageMapLimit = 12;
+    renderPageMap();
+  };
+  window.addEventListener("analysis:project", () => {
+    pageSearch.value = "";
+    pageMapLimit = 12;
+    renderPageMap();
+  });
+  window.addEventListener("analysis:scope", renderPageMap);
   const treePanel = $(".tree-panel");
   tree.body.append(treePanel);
   const treeEmpty = make(
@@ -249,7 +345,8 @@
           (context.node.attrs.id ? "#" + context.node.attrs.id : ""),
       ),
     );
-    const graph = window.PageWorkbench.componentFlow();
+    const rawGraph = window.PageWorkbench.componentFlow();
+    const graph = window.AnalysisScope.graph(rawGraph);
     if (!graph.nodes.length) {
       jsOverview.append(
         make(
@@ -289,7 +386,7 @@
     for (const n of graph.nodes.filter((n) => n.kind === "events")) visit(n);
     for (const n of graph.nodes.filter((n) => !incoming.has(n.id))) visit(n);
     for (const n of graph.nodes) visit(n);
-    const visible = ordered.slice(0, 12),
+    const visible = ordered.slice(0, window.AnalysisScope.config().nodes),
       ids = new Set(visible.map((n) => n.id));
     jsOverview.append(
       make(
@@ -396,10 +493,22 @@
             " 個節點；完整圖可逐層展開並調整接線。",
         ),
       );
+    jsOverview.append(
+      make(
+        "p",
+        "muted",
+        "另有 " +
+          graph.hiddenNodes +
+          " 個其他範圍／套件節點、" +
+          graph.hiddenEdges +
+          " 條未呈現連線；可在完整圖調整範圍。",
+      ),
+    );
     for (const warning of graph.warnings)
       jsOverview.append(make("p", "muted", warning));
   }
   window.addEventListener("analyzer:selection", renderJavaScriptOverview);
+  window.addEventListener("analysis:scope", renderJavaScriptOverview);
   const viewer = $(".viewer");
   preview.body.append(viewer);
   const inspectActions = make("div", "node-preview-actions");
@@ -764,6 +873,39 @@
     );
   }).observe(mainWireTools);
 
+  const readingTools = make("div", "reading-scope-tools");
+  const readingLabel = make("label", "", "閱讀深度 "),
+    readingMode = make("select");
+  readingMode.setAttribute("aria-label", "閱讀深度");
+  for (const [v, t] of [
+    ["overview", "概覽：先看重點"],
+    ["trace", "追查：逐層展開"],
+    ["detail", "詳細：完整依據"],
+  ]) {
+    const o = make("option", "", t);
+    o.value = v;
+    readingMode.append(o);
+  }
+  readingMode.value = window.AnalysisScope.mode();
+  readingMode.onchange = () => window.AnalysisScope.setMode(readingMode.value);
+  readingLabel.append(readingMode);
+  const scopeTrail = make("span", "reading-scope-trail");
+  readingTools.append(readingLabel, scopeTrail);
+  mainWireTools.append(readingTools);
+  function updateScopeTrail() {
+    const ctx = window.PageWorkbench?.locatorContext();
+    scopeTrail.textContent = ctx
+      ? (window.AnalysisScope.page() || ctx.report.source_label) +
+        " › " +
+        ctx.node.tag +
+        (ctx.node.attrs.id ? "#" + ctx.node.attrs.id : "") +
+        " › " +
+        window.AnalysisScope.config().name
+      : "選擇頁面，再選取元件；全專案搜尋是獨立入口";
+    readingMode.value = window.AnalysisScope.mode();
+  }
+  window.addEventListener("analyzer:selection", updateScopeTrail);
+  window.addEventListener("analysis:scope", updateScopeTrail);
   const mainWires = new WireLayout.Editor(
     world,
     mainWireTools,
@@ -1409,16 +1551,68 @@
     "functions-empty",
     () => renderComponentFlow(),
   );
+  let selectedFlowEvent = "",
+    focusedFunction = "",
+    showLibraries = false,
+    showPossible = false,
+    groupByFile = true;
+  const flowScopeTools = make("div", "flow-scope-tools"),
+    flowEvent = make("select");
+  flowEvent.setAttribute("aria-label", "要追查的事件入口");
+  flowEvent.onchange = () => {
+    selectedFlowEvent = flowEvent.value;
+    focusedFunction = "";
+    renderComponentFlow();
+  };
+  function flowCheck(text, onChange) {
+    const label = make("label", ""),
+      c = make("input");
+    c.type = "checkbox";
+    c.onchange = () => onChange(c.checked);
+    label.append(c, document.createTextNode(text));
+    flowScopeTools.append(label);
+    return c;
+  }
+  flowScopeTools.append(make("span", "", "追查入口"), flowEvent);
+  flowCheck("包含套件／壓縮程式", (v) => {
+    showLibraries = v;
+    renderComponentFlow();
+  });
+  flowCheck("包含未確認連線", (v) => {
+    showPossible = v;
+    renderComponentFlow();
+  });
+  const fileGrouping = flowCheck("依檔案分組", (v) => {
+    groupByFile = v;
+    functionPositions.clear();
+    renderComponentFlow();
+  });
+  fileGrouping.checked = true;
+  const clearFocus = button("返回事件路徑", "", () => {
+    focusedFunction = "";
+    renderComponentFlow();
+  });
+  flowScopeTools.append(clearFocus);
+  flowTop.after(flowScopeTools);
+  window.addEventListener("analysis:scope", () => {
+    if (currentFunctionFlow) {
+      functionLimit = window.AnalysisScope.config().nodes;
+      renderComponentFlow();
+    }
+  });
   function renderComponentFlow(input) {
     const previousScroll = {
       left: flowCanvas.scrollLeft,
       top: flowCanvas.scrollTop,
     };
     if (input) {
+      const rememberedPositions = new Map(functionPositions),
+        rememberedKey = functionLayoutKey,
+        rememberedExpanded = new Set(expandedFunctions);
       currentFunctionFlow = input;
       expandedFunctions.clear();
       showAllFunctions = false;
-      functionLimit = 40;
+      functionLimit = window.AnalysisScope.config().nodes;
       functionLayoutKey =
         "functions-" +
         WireLayout.hash(
@@ -1431,6 +1625,15 @@
         );
       functionWires.setScope(functionLayoutKey);
       functionPositions = new Map(Object.entries(functionWires.state.nodes));
+      if (rememberedKey === functionLayoutKey) {
+        for (const [id, p] of rememberedPositions) functionPositions.set(id, p);
+        expandedFunctions = rememberedExpanded;
+      } else {
+        selectedFlowEvent =
+          input.nodes.find((n) => ["event", "inline-event"].includes(n.type))
+            ?.id || "";
+        focusedFunction = "";
+      }
       flowEvidence.hidden = true;
     }
     const complete = currentFunctionFlow || {
@@ -1438,14 +1641,40 @@
       edges: [],
       warnings: [],
     };
+    const entries = window.AnalysisScope.graph(complete, {
+      libraries: showLibraries,
+      possible: true,
+    }).nodes.filter((n) => ["event", "inline-event"].includes(n.type));
+    if (
+      input &&
+      (!selectedFlowEvent || !entries.some((n) => n.id === selectedFlowEvent))
+    )
+      selectedFlowEvent = entries[0]?.id || "";
+    flowEvent.replaceChildren();
+    const allEntry = make("option", "", "全部元件入口");
+    allEntry.value = "";
+    flowEvent.append(allEntry);
+    for (const n of entries) {
+      const o = make("option", "", n.title + " · " + n.file);
+      o.value = n.id;
+      flowEvent.append(o);
+    }
+    flowEvent.value = selectedFlowEvent;
+    const scoped = window.AnalysisScope.graph(complete, {
+      event: selectedFlowEvent,
+      focus: focusedFunction,
+      libraries: showLibraries,
+      possible: showPossible,
+    });
+    clearFocus.hidden = !focusedFunction;
     const projection = window.FunctionFlow.view(
-      complete,
+      scoped,
       expandedFunctions,
-      showAllFunctions,
+      showAllFunctions || !!focusedFunction,
       functionLimit,
     );
     const graph = {
-      ...complete,
+      ...scoped,
       nodes: projection.nodes,
       edges: projection.edges,
     };
@@ -1465,11 +1694,47 @@
         ),
       );
     }
-    flowAll.textContent = showAllFunctions ? "逐層瀏覽" : "展開全部";
+    const special = complete.edges.filter(
+      (e) =>
+        e.certainty === "possible" ||
+        e.from === e.to ||
+        complete.edges.some((r) => r.from === e.to && r.to === e.from),
+    );
+    if (special.length) {
+      const details = make("details", "flow-special-relations");
+      details.append(
+        make("summary", "", "未確認／循環關聯 · " + special.length),
+      );
+      for (const e of special.slice(0, 50)) {
+        const from = complete.nodes.find((n) => n.id === e.from),
+          to = complete.nodes.find((n) => n.id === e.to);
+        details.append(
+          button(
+            (from?.title || e.from) +
+              " → " +
+              (to?.title || e.to) +
+              " · " +
+              (e.certainty === "possible" ? "未確認" : "循環／往返"),
+            "code",
+            () => openFlowEvidence(e, complete),
+          ),
+        );
+      }
+      if (special.length > 50)
+        details.append(
+          make("p", "muted", "先列 50 條，其餘可啟用未確認連線並逐層追查。"),
+        );
+      flowConnections.append(details);
+    }
+    flowAll.textContent = showAllFunctions ? "逐層瀏覽" : "展開可達節點";
     flowAll.setAttribute("aria-pressed", String(showAllFunctions));
     flowMore.hidden = projection.remaining === 0;
     flowMore.textContent =
-      "再顯示 40 個區塊（尚有 " + projection.remaining + " 個）";
+      "再顯示 " +
+      window.AnalysisScope.config().nodes +
+      " 個區塊（尚有 " +
+      projection.remaining +
+      " 個）";
     const first =
       graph.nodes.find((n) => n.kind === "functions") ||
       graph.nodes.find((n) => n.kind === "bindings") ||
@@ -1479,7 +1744,17 @@
     functionWires.layer.remove();
     flowWorld.replaceChildren();
     flowNote.textContent =
-      "先看元件變數、事件與直接處理函式，按節點的「展開下游」繼續追查。點函式看整段原檔，點連線看依據。" +
+      "目前頁面 " +
+      window.AnalysisScope.page() +
+      "；" +
+      (focusedFunction
+        ? "只看聚焦節點的直接上下游。"
+        : "從選定事件逐層展開，套件與未確認連線預設收起。") +
+      " 已隱藏 " +
+      scoped.hiddenNodes +
+      " 個其他範圍／路徑節點、" +
+      scoped.hiddenEdges +
+      " 條連線。點節點「只看直連」可縮小範圍。" +
       " 目前顯示 " +
       graph.nodes.length +
       "／" +
@@ -1511,11 +1786,19 @@
         timers: 3,
         bindings: 0,
       },
-      bottoms = Array(9).fill(40);
+      bottoms = Array(
+        Math.max(9, new Set(graph.nodes.map((n) => n.file)).size),
+      ).fill(40);
+    const fileGroups = [...new Set(graph.nodes.map((n) => n.file))];
     for (const node of graph.nodes) {
       const card = make("article", "component-flow-node");
       card.dataset.kind = node.kind;
       card.dataset.flowNode = node.id;
+      card.dataset.file = node.file;
+      card.style.setProperty(
+        "--file-hue",
+        String(parseInt(WireLayout.hash(node.file), 36) % 360),
+      );
       const heading = make("button", "component-flow-handle", node.title);
       heading.type = "button";
       heading.title = "拖曳移動；方向鍵調整位置";
@@ -1566,6 +1849,14 @@
         codePanel.scrollIntoView({ block: "nearest", behavior: "smooth" });
       };
       card.append(heading, meta, snippet);
+      card.append(
+        button("只看直連", "", () => {
+          focusedFunction = node.id;
+          renderComponentFlow();
+        }),
+      );
+      snippet.hidden = true;
+      card.append(button("查看原始碼", "code", () => snippet.click()));
       if (node.type === "function") {
         const downstream = [
           ...new Set(
@@ -1626,7 +1917,9 @@
       }
       if (node.note) card.append(make("p", "flow-unresolved", node.note));
       flowWorld.append(card);
-      const column = node.column ?? categories[node.kind] ?? 3;
+      const column = groupByFile
+        ? fileGroups.indexOf(node.file)
+        : (node.column ?? categories[node.kind] ?? 3);
       card.style.left = 35 + column * 340 + "px";
       card.style.top = bottoms[column] + "px";
       bottoms[column] += card.offsetHeight + 60;
@@ -1636,18 +1929,35 @@
         card.style.left = saved.x + "px";
         card.style.top = saved.y + "px";
       }
-      const settled = window.CanvasLayout.settle(
-        cards.map((c) => ({
-          id: c.id,
-          x: c.el.offsetLeft,
-          y: c.el.offsetTop,
-          width: c.el.offsetWidth,
-          height: c.el.offsetHeight,
-        })),
-      );
-      for (let i = 0; i < cards.length; i++) {
-        cards[i].el.style.left = settled[i].x + "px";
-        cards[i].el.style.top = settled[i].y + "px";
+      if (!saved) {
+        let y = card.offsetTop;
+        const occupied = [...functionPositions]
+          .filter(([id]) => id !== node.id)
+          .map(([id, p]) => ({ id, x: p.x, y: p.y, width: 280, height: 240 }));
+        occupied.push(
+          ...cards
+            .filter((c) => c.id !== node.id)
+            .map((c) => ({
+              id: c.id,
+              x: c.el.offsetLeft,
+              y: c.el.offsetTop,
+              width: c.el.offsetWidth,
+              height: c.el.offsetHeight,
+            })),
+        );
+        for (let pass = 0; pass < occupied.length + 1; pass++) {
+          const box = {
+              x: card.offsetLeft,
+              y,
+              width: card.offsetWidth,
+              height: card.offsetHeight,
+            },
+            hits = occupied.filter((b) => CanvasLayout.overlaps(box, b));
+          if (!hits.length) break;
+          y = Math.max(...hits.map((b) => b.y + b.height + 60));
+        }
+        card.style.top = y + "px";
+        bottoms[column] = Math.max(bottoms[column], y + card.offsetHeight + 60);
       }
       const geometry = () =>
         cards.map((c) => ({
@@ -1826,13 +2136,13 @@
     );
     changeFlowScale(0);
   });
-  const flowAll = button("展開全部", "", () => {
+  const flowAll = button("展開可達節點", "", () => {
     showAllFunctions = !showAllFunctions;
     expandedFunctions.clear();
     renderComponentFlow();
   });
   const flowMore = button("再顯示 40 個區塊", "", () => {
-    functionLimit += 40;
+    functionLimit += window.AnalysisScope.config().nodes;
     renderComponentFlow();
   });
   flowMore.hidden = true;

@@ -26,7 +26,7 @@
   search.setAttribute("aria-label", "搜尋全專案原始碼");
   const descendants = make("input");
   descendants.type = "checkbox";
-  descendants.checked = true;
+  descendants.checked = false;
   const descendantLabel = make("label", "包含子元素");
   descendantLabel.prepend(descendants);
   const refresh = button("重新找元件關聯", () => run());
@@ -98,7 +98,8 @@
       );
       sourceMeta.textContent = "已複製位置。";
     } catch {
-      sourceMeta.textContent = current.file + ":" + current.line + ":" + current.column;
+      sourceMeta.textContent =
+        current.file + ":" + current.line + ":" + current.column;
     }
   });
   const download = button("下載原始檔", () => {
@@ -228,7 +229,11 @@
           );
         const mark = make("mark");
         mark.append(paint(lines[i].slice(a, b)));
-        text.append(paint(lines[i].slice(0, a)), mark, paint(lines[i].slice(b)));
+        text.append(
+          paint(lines[i].slice(0, a)),
+          mark,
+          paint(lines[i].slice(b)),
+        );
       } else
         text.append(
           window.SourceCodeView.paint(
@@ -260,7 +265,9 @@
   function category(record) {
     return ["html", "inline-event", "inline-style"].includes(record.type)
       ? "html"
-      : ["css", "css-declaration", "keyframes", "css-import"].includes(record.type)
+      : ["css", "css-declaration", "keyframes", "css-import"].includes(
+            record.type,
+          )
         ? "css"
         : record.type === "text"
           ? "text"
@@ -285,7 +292,10 @@
           "locator-confidence",
         ),
         make("strong", r.file + ":" + r.line + ":" + r.column),
-        make("span", (names[r.type] || r.type) + (r.name ? " · " + r.name : "")),
+        make(
+          "span",
+          (names[r.type] || r.type) + (r.name ? " · " + r.name : ""),
+        ),
         make("small", r.reasons.join("；")),
       );
       const raw = window.LocatorIndex.source(r.file);
@@ -293,7 +303,9 @@
         row.append(
           make(
             "code",
-            raw.slice(r.start, Math.min(r.end, r.start + 180)).replace(/\s+/g, " "),
+            raw
+              .slice(r.start, Math.min(r.end, r.start + 180))
+              .replace(/\s+/g, " "),
           ),
         );
       row.classList.toggle("selected", current?.id === r.id);
@@ -340,7 +352,10 @@
       coverageBody.append(
         make(
           "p",
-          issue.file + (issue.line ? ":" + issue.line : "") + " · " + issue.reason,
+          issue.file +
+            (issue.line ? ":" + issue.line : "") +
+            " · " +
+            issue.reason,
         ),
       );
     if (issues.length > 150)
@@ -349,7 +364,9 @@
       button("下載完整查找結果 JSON", () => {
         const out = { ...data, results: data.results?.map(({ ...r }) => r) };
         const url = URL.createObjectURL(
-          new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }),
+          new Blob([JSON.stringify(out, null, 2)], {
+            type: "application/json",
+          }),
         );
         const a = document.createElement("a");
         a.href = url;
@@ -362,7 +379,8 @@
   async function run(seedIDs = []) {
     const ctx = context();
     if (!ctx) {
-      status.textContent = "請先開啟一個 HTML 頁面並選取元件；也可以使用全專案文字搜尋。";
+      status.textContent =
+        "請先開啟一個 HTML 頁面並選取元件；也可以使用全專案文字搜尋。";
       return;
     }
     const id = ++request;
@@ -374,7 +392,11 @@
     sourceCode.textContent = "";
     refresh.disabled = true;
     try {
-      const data = await window.LocatorIndex.locate(ctx, descendants.checked, seedIDs);
+      const data = await window.LocatorIndex.locate(
+        ctx,
+        descendants.checked,
+        seedIDs,
+      );
       if (
         id !== request ||
         context()?.report.id !== ctx.report.id ||
@@ -405,12 +427,22 @@
                   : ["event", "inline-event"].includes(r.type)
                     ? "事件 · " + (r.event || r.name)
                     : "取得元件 · " + r.name,
-              source: (window.LocatorIndex.source(r.file) || "").slice(r.start, r.end),
-              note: r.certainty === "possible" ? "可能相關，尚未確認執行時目標" : "",
+              source: (window.LocatorIndex.source(r.file) || "").slice(
+                r.start,
+                r.end,
+              ),
+              note:
+                r.certainty === "possible"
+                  ? "可能相關，尚未確認執行時目標"
+                  : "",
             })),
             edges: graph.edges,
             warnings: data.gaps?.length
-              ? ["索引有 " + data.gaps.length + " 項待確認，可查看下方搜尋範圍與缺口。"]
+              ? [
+                  "索引有 " +
+                    data.gaps.length +
+                    " 項待確認，可查看下方搜尋範圍與缺口。",
+                ]
               : [],
           },
         }),
@@ -516,7 +548,12 @@
     show({
       id: "search:" + path + ":" + start,
       file: path,
-      type: value.kind === "css" ? "css" : value.kind === "js" ? "reference" : "html",
+      type:
+        value.kind === "css"
+          ? "css"
+          : value.kind === "js"
+            ? "reference"
+            : "html",
       start,
       end,
       line,
@@ -553,8 +590,10 @@
       sourceMeta.textContent = "";
       refresh.disabled = false;
     }
-    if (event.detail.phase === "building") status.textContent = event.detail.message;
-    else if (event.detail.phase === "error") status.textContent = event.detail.message;
+    if (event.detail.phase === "building")
+      status.textContent = event.detail.message;
+    else if (event.detail.phase === "error")
+      status.textContent = event.detail.message;
     updateSelection();
   });
   function openSearch() {
@@ -570,7 +609,8 @@
     globalMode = true;
     refresh.disabled = false;
     search.focus();
-    status.textContent = window.LocatorIndex.state().message + " 輸入文字查找原始位置。";
+    status.textContent =
+      window.LocatorIndex.state().message + " 輸入文字查找原始位置。";
   }
   const launch = button("查找", openSearch, "canvas-button locator-launch");
   launch.setAttribute("aria-label", "全專案程式碼查找");
@@ -606,11 +646,16 @@
   function updateSelection() {
     const ctx = context();
     selectedTitle.textContent = ctx
-      ? "<" + ctx.node.tag + ">" + (ctx.node.attrs.id ? " #" + ctx.node.attrs.id : "")
+      ? "<" +
+        ctx.node.tag +
+        ">" +
+        (ctx.node.attrs.id ? " #" + ctx.node.attrs.id : "")
       : "尚未選取元件";
     selectedLocation.textContent = ctx
       ? ctx.report.source_label +
-        (ctx.node.location ? ":" + ctx.node.location.line : " · 原始位置尚未確認")
+        (ctx.node.location
+          ? ":" + ctx.node.location.line
+          : " · 原始位置尚未確認")
       : "載入頁面後，點選預覽或 HTML 結構。";
   }
   new MutationObserver(updateSelection).observe($("#selected-node"), {

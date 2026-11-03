@@ -5,24 +5,24 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>網頁分析器 · 元件原始碼位置與跨檔案引用</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script src="./source-utils.js?v=20261103-wiringbar4" defer></script>
-    <script src="./css-lab.js?v=20261103-wiringbar4" defer></script>
-    <script src="./static-analyzer.js?v=20261103-wiringbar4" defer></script>
-    <script src="./source-code-view.js?v=20261103-wiringbar4" defer></script>
-    <script src="./locator-index.js?v=20261103-wiringbar4" defer></script>
-    <script src="./app.js?v=20261103-wiringbar4" defer></script>
-    <link rel="stylesheet" href="./project.css?v=20261103-wiringbar4">
-    <script src="./project-core.js?v=20261103-wiringbar4" defer></script>
-    <script src="./project-page.js?v=20261103-wiringbar4" defer></script>
-    <script src="./project-ui.js?v=20261103-wiringbar4" defer></script>
-    <link rel="stylesheet" href="./workspace.css?v=20261103-smallports5">
-    <script src="./canvas-layout.js?v=20261103-wiringbar4" defer></script>
-    <script src="./wire-layout.js?v=20261103-wiringbar4" defer></script>
-    <script src="./function-flow.js?v=20261103-wiringbar4" defer></script>
-    <script src="./component-flow.js?v=20261103-wiringbar4" defer></script>
-    <script src="./workspace.js?v=20261103-wiringbar4" defer></script>
-    <link rel="stylesheet" href="./locator.css?v=20261103-wiringbar4">
-    <script src="./locator-ui.js?v=20261103-wiringbar4" defer></script>
+    <script src="./source-utils.js?v=20261103-structure6" defer></script>
+    <script src="./css-lab.js?v=20261103-structure6" defer></script>
+    <script src="./static-analyzer.js?v=20261103-structure6" defer></script>
+    <script src="./source-code-view.js?v=20261103-structure6" defer></script>
+    <script src="./locator-index.js?v=20261103-structure6" defer></script>
+    <script src="./app.js?v=20261103-structure6" defer></script>
+    <link rel="stylesheet" href="./project.css?v=20261103-structure6">
+    <script src="./project-core.js?v=20261103-structure6" defer></script>
+    <script src="./project-page.js?v=20261103-structure6" defer></script>
+    <script src="./project-ui.js?v=20261103-structure6" defer></script>
+    <link rel="stylesheet" href="./workspace.css?v=20261103-structure6">
+    <script src="./canvas-layout.js?v=20261103-structure6" defer></script>
+    <script src="./wire-layout.js?v=20261103-structure6" defer></script>
+    <script src="./function-flow.js?v=20261103-structure6" defer></script>
+    <script src="./component-flow.js?v=20261103-structure6" defer></script>
+    <script src="./workspace.js?v=20261103-structure6" defer></script>
+    <link rel="stylesheet" href="./locator.css?v=20261103-structure6">
+    <script src="./locator-ui.js?v=20261103-structure6" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -31,7 +31,7 @@
         <div>網頁分析器<small>結構・樣式・互動，一起看懂。</small></div>
       </div>
       <div class="top-actions">
-        <button id="demo">載入示範</button
+        <button id="demo">執行網頁預覽</button
         ><button id="export-report" disabled>下載分析 JSON</button
         ><a href="https://github.com/Ericcc-zizgf/web-analyzer#readme" id="home-link" target="_blank" rel="noopener"
           >使用說明與原始碼 ↗</a
@@ -223,11 +223,7 @@
           </section>
           <aside class="inspector">
             <div class="panel-title"><h2 id="selected-node">選取元素</h2></div>
-            <div class="inspect-tabs">
-              <button data-inspect="html" class="active">HTML</button
-              ><button data-inspect="css">CSS</button
-              ><button data-inspect="js">JavaScript</button>
-            </div>
+            <div class="inspect-tabs"><button data-inspect="css" class="active">CSS 結構</button></div>
             <div id="inspect-content"></div>
           </aside>
         </div>
@@ -239,7 +235,7 @@
         </div>
         <h2>每一個畫面，都有可以讀懂的結構。</h2>
         <p>從自己的作品開始，點選元素，找出它的排版與互動方式。</p>
-        <button id="empty-demo" class="primary">用示範網頁試試 →</button>
+        <button id="empty-demo" class="primary">執行網頁預覽</button>
         <div class="empty-topics">
           <span><b>HTML</b> 元素與層級</span><span><b>CSS</b> 樣式與排版</span
           ><span><b>JS</b> 事件與函式</span>

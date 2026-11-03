@@ -5,7 +5,7 @@ let mode = "url",
   report = null,
   nodeMap = new Map(),
   selected = null,
-  inspectTab = "html",
+  inspectTab = "css",
   view = "preview",
   sourceFile = "html",
   sourceText = "",
@@ -96,7 +96,9 @@ function workerCall(type, data) {
       if (task) {
         pending.delete(e.data.id);
         clearTimeout(task.timer);
-        e.data.error ? task.reject(Error(e.data.error)) : task.resolve(e.data.result);
+        e.data.error
+          ? task.reject(Error(e.data.error))
+          : task.resolve(e.data.result);
       }
     };
     worker.onerror = () => stopWorker("JavaScript 解析器無法啟動");
@@ -126,7 +128,8 @@ function setMode(value) {
     b.classList.toggle("active", b.dataset.mode === value);
     b.setAttribute("aria-selected", b.dataset.mode === value);
   });
-  for (const key of ["url", "html", "file"]) $("#input-" + key).hidden = key !== value;
+  for (const key of ["url", "html", "file"])
+    $("#input-" + key).hidden = key !== value;
 }
 function showView(value) {
   view = value;
@@ -143,7 +146,9 @@ function label(node) {
     node.tag +
     ">" +
     (node.attrs.id ? " #" + node.attrs.id : "") +
-    (node.attrs.class ? " ." + node.attrs.class.split(/\s+/).slice(0, 2).join(".") : "")
+    (node.attrs.class
+      ? " ." + node.attrs.class.split(/\s+/).slice(0, 2).join(".")
+      : "")
   );
 }
 async function analyze(projectInput = null) {
@@ -201,7 +206,8 @@ async function analyze(projectInput = null) {
     for (const n of report.nodes) if (n.depth < 2) expanded.add(n.id);
     jsResults = [];
     jsScope = "element";
-    selected = report.nodes.find((n) => n.tag === "body")?.id || report.nodes[0].id;
+    selected =
+      report.nodes.find((n) => n.tag === "body")?.id || report.nodes[0].id;
     $("#results").hidden = false;
     $("#empty-state").hidden = true;
     $("#export-report").disabled = false;
@@ -221,7 +227,11 @@ async function analyze(projectInput = null) {
     if (scripts.length)
       try {
         jsResults = await workerCall("analyze", {
-          files: scripts.map((f) => ({ id: f.id, source: f.source, label: f.label })),
+          files: scripts.map((f) => ({
+            id: f.id,
+            source: f.source,
+            label: f.label,
+          })),
         });
       } catch (error) {
         if (run === runSerial) report.warnings.push(error.message);
@@ -233,13 +243,18 @@ async function analyze(projectInput = null) {
           item.kind = "模組依賴（本機檔案已嘗試展開）";
       const file = report.files.find((f) => f.id === result.id);
       if (result.error)
-        report.warnings.push(file.label + "：JS 語法無法解析（" + result.error + "）");
+        report.warnings.push(
+          file.label + "：JS 語法無法解析（" + result.error + "）",
+        );
       if (result.truncated?.length)
         report.warnings.push(
-          file.label + "：部分語法清單超過 160 筆顯示上限；計數仍列出解析總數。",
+          file.label +
+            "：部分語法清單超過 160 筆顯示上限；計數仍列出解析總數。",
         );
       if (result.imports?.length && !report.project)
-        report.warnings.push(file.label + "：發現 import／模組依賴，此版本不展開。");
+        report.warnings.push(
+          file.label + "：發現 import／模組依賴，此版本不展開。",
+        );
     }
     const good = jsResults.filter((r) => !r.error);
     $("#count-functions").textContent =
@@ -247,14 +262,18 @@ async function analyze(projectInput = null) {
         ? "—"
         : good.reduce((sum, r) => sum + r.counts.functions, 0);
     $("#count-events").textContent =
-      report.inline_events.length + good.reduce((sum, r) => sum + r.counts.events, 0);
+      report.inline_events.length +
+      good.reduce((sum, r) => sum + r.counts.events, 0);
     renderWarnings();
     renderInspector();
     status("分析完成。點選 HTML 元素，或切換 CSS／JavaScript 查看來源。");
     return true;
   } catch (error) {
     if (run === runSerial)
-      status(error.name === "AbortError" ? "已取消分析。" : error.message, true);
+      status(
+        error.name === "AbortError" ? "已取消分析。" : error.message,
+        true,
+      );
     return false;
   } finally {
     if (run === runSerial) {
@@ -271,7 +290,8 @@ function renderWarnings() {
       : "安全預覽只套用已取得的 HTML／CSS，外部圖片、字型、CSS @import 與 JS import 依賴未展開。",
     ...report.warnings,
   ];
-  $("#warnings-title").textContent = "分析範圍與讀取紀錄 · " + notes.length + " 項";
+  $("#warnings-title").textContent =
+    "分析範圍與讀取紀錄 · " + notes.length + " 項";
   $("#warning-list").replaceChildren(...notes.map((n) => el("li", n)));
 }
 function renderTree() {
@@ -312,7 +332,10 @@ function renderTree() {
       toggle.className = "tree-toggle";
       toggle.dataset.toggle = n.id;
       toggle.setAttribute("aria-expanded", String(isOpen));
-      toggle.setAttribute("aria-label", (isOpen ? "收合 " : "展開 ") + label(n));
+      toggle.setAttribute(
+        "aria-label",
+        (isOpen ? "收合 " : "展開 ") + label(n),
+      );
       toggle.disabled = Boolean(search);
       toggle.title = search
         ? "搜尋時自動展開符合的路徑；清除搜尋後可收合"
@@ -330,11 +353,14 @@ function renderTree() {
     item.title = label(n) + " " + n.text;
     row.append(toggle, item);
     tree.append(row);
-    if (expanded.has(n.id) || search) for (const id of n.children) visit(nodeMap.get(id));
+    if (expanded.has(n.id) || search)
+      for (const id of n.children) visit(nodeMap.get(id));
   }
   for (const n of report.nodes) if (!n.parent) visit(n);
   if (!tree.children.length)
-    tree.append(el("p", "找不到符合的元素，試試其他標籤或名稱。", "tree-empty"));
+    tree.append(
+      el("p", "找不到符合的元素，試試其他標籤或名稱。", "tree-empty"),
+    );
   $("#tree-total").textContent =
     (search ? visible.size + " / " : "") + report.nodes.length + " 個";
 }
@@ -352,13 +378,17 @@ function selectNode(id) {
   if (active) {
     const area = tree.getBoundingClientRect();
     const row = active.getBoundingClientRect();
-    if (row.bottom > area.bottom) tree.scrollTop += row.bottom - area.bottom + 8;
+    if (row.bottom > area.bottom)
+      tree.scrollTop += row.bottom - area.bottom + 8;
     else if (row.top < area.top) tree.scrollTop -= area.top - row.top + 8;
   }
   markSelection();
   renderInspector();
   if (view === "source")
-    openSource("html", nodeMap.get(id)?.location?.line || nodeMap.get(id)?.line || 1);
+    openSource(
+      "html",
+      nodeMap.get(id)?.location?.line || nodeMap.get(id)?.line || 1,
+    );
 }
 function previewElement() {
   try {
@@ -445,16 +475,20 @@ function renderInspector() {
   $("#selected-node").textContent = label(node);
   document
     .querySelectorAll("[data-inspect]")
-    .forEach((b) => b.classList.toggle("active", b.dataset.inspect === inspectTab));
+    .forEach((b) =>
+      b.classList.toggle("active", b.dataset.inspect === inspectTab),
+    );
   if (inspectTab === "html") {
     box.append(el("p", definition(node), "info-box"), title("屬性 Attributes"));
     const list = el("dl", undefined, "attributes");
     for (const [k, v] of Object.entries(node.attrs)) {
       list.append(el("dt", k), el("dd", v));
     }
-    if (!list.children.length) box.append(el("p", "沒有明確指定屬性。", "muted"));
+    if (!list.children.length)
+      box.append(el("p", "沒有明確指定屬性。", "muted"));
     else box.append(list);
-    if (node.text) box.append(title("直接文字內容"), el("p", node.text, "muted"));
+    if (node.text)
+      box.append(title("直接文字內容"), el("p", node.text, "muted"));
     box.append(
       el(
         "p",
@@ -475,7 +509,9 @@ function renderInspector() {
       btn("看原始 HTML", () => openSource("html", node.line || 1)),
     );
     box.append(buttons);
-    const events = report.inline_events.filter((e) => e.target_node === selected);
+    const events = report.inline_events.filter(
+      (e) => e.target_node === selected,
+    );
     if (events.length) {
       box.append(title("HTML 事件屬性（未執行）"));
       for (const event of events) {
@@ -486,6 +522,7 @@ function renderInspector() {
     }
   } else if (inspectTab === "css") renderCSS(box, node);
   else renderJS(box, node);
+  window.dispatchEvent(new CustomEvent("analyzer:selection"));
 }
 function conditionState(rule, win) {
   let unknown = false;
@@ -493,7 +530,8 @@ function conditionState(rule, win) {
     try {
       if (c.type === "media" && !win.matchMedia(c.condition).matches)
         return "目前尺寸不符合";
-      if (c.type === "supports" && !win.CSS.supports(c.condition)) return "瀏覽器不支援";
+      if (c.type === "supports" && !win.CSS.supports(c.condition))
+        return "瀏覽器不支援";
       if (!["media", "supports", "layer"].includes(c.type)) unknown = true;
     } catch {
       unknown = true;
@@ -557,7 +595,8 @@ function renderCSS(box, node) {
     ])
       list.append(el("dt", key), el("dd", computed.getPropertyValue(key)));
     box.append(list);
-  } else box.append(el("p", "此節點不在安全預覽中，無法取得運算樣式。", "muted"));
+  } else
+    box.append(el("p", "此節點不在安全預覽中，無法取得運算樣式。", "muted"));
   function draw() {
     area.replaceChildren();
     let chosen = report.css_rules.filter((rule) => {
@@ -570,10 +609,17 @@ function renderCSS(box, node) {
       }
     });
     area.append(
-      title((check.checked ? "選擇器相符" : "全部") + "：" + chosen.length + " 條規則"),
+      title(
+        (check.checked ? "選擇器相符" : "全部") +
+          "：" +
+          chosen.length +
+          " 條規則",
+      ),
     );
     if (check.checked)
-      area.append(el("p", "偽元素及 :hover 等狀態可能不在這份相符清單。", "muted"));
+      area.append(
+        el("p", "偽元素及 :hover 等狀態可能不在這份相符清單。", "muted"),
+      );
     for (const rule of chosen.slice(0, 70)) {
       const state = conditionState(rule, win),
         card = el(
@@ -586,7 +632,9 @@ function renderCSS(box, node) {
         card.append(
           el(
             "p",
-            rule.conditions.map((c) => "@" + c.type + " " + c.condition).join(" / ") +
+            rule.conditions
+              .map((c) => "@" + c.type + " " + c.condition)
+              .join(" / ") +
               " · " +
               state,
           ),
@@ -597,7 +645,11 @@ function renderCSS(box, node) {
           rule.declarations
             .map(
               (d) =>
-                d.property + ": " + d.value + (d.important ? " !important" : "") + ";",
+                d.property +
+                ": " +
+                d.value +
+                (d.important ? " !important" : "") +
+                ";",
             )
             .join("\n"),
         ),
@@ -611,7 +663,9 @@ function renderCSS(box, node) {
       area.append(card);
     }
     if (chosen.length > 70)
-      area.append(el("p", "目前顯示前 70 條，可到原始碼查看完整內容。", "muted"));
+      area.append(
+        el("p", "目前顯示前 70 條，可到原始碼查看完整內容。", "muted"),
+      );
   }
   check.onchange = draw;
   draw();
@@ -683,7 +737,10 @@ function renderJS(box, node) {
         card.append(
           el(
             "code",
-            "on" + event.event + " → " + (targetNode ? label(targetNode) : "HTML 元素"),
+            "on" +
+              event.event +
+              " → " +
+              (targetNode ? label(targetNode) : "HTML 元素"),
           ),
           el("p", "HTML 事件屬性"),
           el("pre", event.code),
@@ -692,7 +749,9 @@ function renderJS(box, node) {
         area.append(card);
       }
     }
-    for (const file of report.files.filter((f) => ["js", "data"].includes(f.kind))) {
+    for (const file of report.files.filter((f) =>
+      ["js", "data"].includes(f.kind),
+    )) {
       const parsed = jsResults.find((r) => r.id === file.id);
       if (!file.loaded || parsed?.error || (file.kind === "js" && !parsed)) {
         incomplete = true;
@@ -712,7 +771,11 @@ function renderJS(box, node) {
       if (file.kind === "data") {
         if (all)
           area.append(
-            el("p", file.label + "：資料腳本，不屬於元素的互動程式。", "info-box"),
+            el(
+              "p",
+              file.label + "：資料腳本，不屬於元素的互動程式。",
+              "info-box",
+            ),
           );
         continue;
       }
@@ -720,7 +783,8 @@ function renderJS(box, node) {
       const items = parsed[category.value] || [];
       const relevant = items.filter(
         (item) =>
-          all || (item.relatedTargets || [item.target || item.selector]).some(matches),
+          all ||
+          (item.relatedTargets || [item.target || item.selector]).some(matches),
       );
       omitted += items.length - relevant.length;
       for (const item of relevant.slice(0, 60)) {
@@ -730,7 +794,11 @@ function renderJS(box, node) {
           category.value === "functions"
             ? item.name + "(" + item.params.join(", ") + ")"
             : category.value === "events"
-              ? item.event + " → " + (item.target || item.receiver) + " → " + item.handler
+              ? item.event +
+                " → " +
+                (item.target || item.receiver) +
+                " → " +
+                item.handler
               : category.value === "network"
                 ? item.api + " " + item.method + " " + item.url
                 : category.value === "selectors"
@@ -756,7 +824,9 @@ function renderJS(box, node) {
         area.append(card);
       }
       if (relevant.length > 60)
-        area.append(el("p", "此檔案僅顯示前 60 筆，其他項目請查看原始碼。", "muted"));
+        area.append(
+          el("p", "此檔案僅顯示前 60 筆，其他項目請查看原始碼。", "muted"),
+        );
     }
     scopeNote.textContent =
       (all ? "整頁範圍" : "目前元素：" + label(node)) +
@@ -769,7 +839,9 @@ function renderJS(box, node) {
         el(
           "p",
           all
-            ? "沒有可列出的「" + category.selectedOptions[0].textContent + "」。"
+            ? "沒有可列出的「" +
+                category.selectedOptions[0].textContent +
+                "」。"
             : "未找到可確認與此元素相關的「" +
                 category.selectedOptions[0].textContent +
                 "」。可切換「整個網頁」查看其他程式。",
@@ -848,10 +920,14 @@ function renderSource(line = 0) {
   const pre = $("#source-code");
   pre.replaceChildren();
   const range =
-    sourceFile === "html" && !formatted ? nodeMap.get(selected)?.location : null;
+    sourceFile === "html" && !formatted
+      ? nodeMap.get(selected)?.location
+      : null;
   const file = report?.files.find((f) => f.id === sourceFile);
   const kind =
-    sourceFile === "html" || sourceFile === "node" ? "html" : file?.kind || "text";
+    sourceFile === "html" || sourceFile === "node"
+      ? "html"
+      : file?.kind || "text";
   let offset = 0;
   sourceText.split("\n").forEach((text, index) => {
     const row = el("span", undefined, "original-source-line");
@@ -885,7 +961,8 @@ function renderSource(line = 0) {
       ratio = rect.width / pre.offsetWidth || 1;
     pre.scrollLeft = Math.max(
       0,
-      (mark.getBoundingClientRect().left - rect.left) / ratio - pre.clientWidth / 3,
+      (mark.getBoundingClientRect().left - rect.left) / ratio -
+        pre.clientWidth / 3,
     );
   }
 }
@@ -962,11 +1039,25 @@ $("#cancel").onclick = () => {
   status("已取消。");
 };
 $("#demo").onclick = () => {
-  setMode("html");
-  $("#html").value = DEMO;
-  $("#base-url").value = "";
-  $("#asset-files").value = "";
-  analyze();
+  if (report) {
+    showView("preview");
+    markSelection();
+    renderInspector();
+    status("已顯示目前網頁預覽；CSS 調整會即時反映。");
+    return;
+  }
+  const hasInput =
+    mode === "html"
+      ? $("#html").value.trim()
+      : mode === "file"
+        ? $("#html-file").files.length
+        : $("#url").value.trim();
+  if (hasInput) {
+    analyze();
+    return;
+  }
+  status("請先開啟專案，或輸入 HTML／網址後再執行網頁預覽。");
+  $("#toggle-input").click();
 };
 $("#empty-demo").onclick = () => $("#demo").click();
 $("#toggle-input").onclick = () => {
@@ -977,7 +1068,8 @@ $("#toggle-input").onclick = () => {
 };
 $("#expand-tree").onclick = () => {
   if (!report) return;
-  for (const node of report.nodes) if (node.children.length) expanded.add(node.id);
+  for (const node of report.nodes)
+    if (node.children.length) expanded.add(node.id);
   renderTree();
 };
 $("#collapse-tree").onclick = () => {
@@ -1007,7 +1099,9 @@ $("#format-source").onclick = async () => {
   try {
     const file = report.files.find((f) => f.id === sourceFile);
     const kind =
-      sourceFile === "html" || sourceFile === "node" ? "html" : file?.kind || "html";
+      sourceFile === "html" || sourceFile === "node"
+        ? "html"
+        : file?.kind || "html";
     const value = await workerCall("format", { source: rawText, kind });
     if (report?.id === analysisId && sourceFile === id) {
       sourceText = value;
@@ -1097,7 +1191,9 @@ window.PageWorkbench = {
       try {
         return document
           .querySelector("#preview")
-          .contentDocument?.querySelector('[data-web-analyzer-node="' + id + '"]');
+          .contentDocument?.querySelector(
+            '[data-web-analyzer-node="' + id + '"]',
+          );
       } catch {
         return null;
       }
@@ -1108,12 +1204,15 @@ window.PageWorkbench = {
       if (nodeId) {
         const element = document
           .querySelector("#preview")
-          .contentDocument?.querySelector('[data-web-analyzer-node="' + nodeId + '"]');
+          .contentDocument?.querySelector(
+            '[data-web-analyzer-node="' + nodeId + '"]',
+          );
         return Boolean(element && target.contains(element));
       }
       try {
         return Boolean(
-          selector && (target.matches(selector) || target.querySelector(selector)),
+          selector &&
+            (target.matches(selector) || target.querySelector(selector)),
         );
       } catch {
         return false;

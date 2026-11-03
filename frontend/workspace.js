@@ -46,8 +46,8 @@
   header.insertBefore(nav, $(".top-actions"));
   const actions = $(".top-actions");
   const demo = $("#demo");
-  demo.setAttribute("aria-label", "載入示範");
-  demo.innerHTML = icon("play") + "<span>載入示範</span>";
+  demo.setAttribute("aria-label", "執行網頁預覽");
+  demo.innerHTML = icon("play") + "<span>執行網頁預覽</span>";
   $("#export-report").setAttribute("aria-label", "匯出目前網頁分析");
   $("#export-report").innerHTML = icon("download") + "<span>匯出分析</span>";
   const openFolder = button(
@@ -132,12 +132,21 @@
   );
   const inspector = createNode(
     "inspector-node",
-    "元素解析",
-    "Inspect",
+    "CSS 結構",
+    "CSS",
     "yellow",
     380,
     740,
-    300,
+    540,
+  );
+  const javascript = createNode(
+    "javascript-node",
+    "JavaScript 流程圖解析",
+    "JavaScript",
+    "yellow",
+    1420,
+    145,
+    520,
   );
   const preview = createNode(
     "preview-node",
@@ -194,9 +203,115 @@
   const inspectorEmpty = make(
     "div",
     "node-empty",
-    "點選結構樹或預覽畫面，查看選中元素的 HTML、CSS 與 JavaScript。",
+    "點選結構樹或預覽畫面，逐項調整 CSS，並追查上一層的排版模型。",
   );
   inspector.body.append(inspectorEmpty);
+  const jsOverview = make("div", "javascript-overview");
+  const jsOpen = button("開啟完整 JavaScript 流程圖", "code", () =>
+    openComponent(),
+  );
+  javascript.body.append(
+    make(
+      "p",
+      "muted",
+      "依目前選取元素整理事件、函式與呼叫關係；線條代表靜態關聯，並非實際執行順序。",
+    ),
+    jsOverview,
+    jsOpen,
+  );
+  function renderJavaScriptOverview() {
+    jsOverview.replaceChildren();
+    const context = window.PageWorkbench?.locatorContext();
+    jsOpen.disabled = !context;
+    if (!context) {
+      jsOverview.append(
+        make("p", "muted", "先執行網頁預覽，再點選要解析的元素。"),
+      );
+      return;
+    }
+    jsOverview.append(
+      make(
+        "p",
+        "javascript-selected",
+        context.node.tag +
+          (context.node.attrs.id ? "#" + context.node.attrs.id : ""),
+      ),
+    );
+    const graph = window.PageWorkbench.componentFlow();
+    if (!graph.nodes.length) {
+      jsOverview.append(
+        make(
+          "p",
+          "muted",
+          "尚未找到此元素可連結的 JavaScript。可開啟完整圖，繼續查找跨檔案與未確認線索。",
+        ),
+      );
+      return;
+    }
+    const visible = graph.nodes.slice(0, 12),
+      ids = new Set(visible.map((n) => n.id));
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute(
+      "viewBox",
+      "0 0 440 " + (Math.ceil(visible.length / 2) * 100 + 20),
+    );
+    svg.classList.add("javascript-mini-flow");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "所選元素的 JavaScript 靜態關聯圖");
+    const points = new Map(
+      visible.map((n, i) => [
+        n.id,
+        { x: 10 + (i % 2) * 220, y: 10 + Math.floor(i / 2) * 100 },
+      ]),
+    );
+    for (const e of graph.edges) {
+      if (!ids.has(e.from) || !ids.has(e.to)) continue;
+      const a = points.get(e.from),
+        b = points.get(e.to),
+        path = document.createElementNS(svg.namespaceURI, "path");
+      path.setAttribute(
+        "d",
+        `M${a.x + 100},${a.y + 56} V${a.y + 76} H${b.x + 100} V${b.y}`,
+      );
+      svg.append(path);
+    }
+    for (const n of visible) {
+      const p = points.get(n.id),
+        g = document.createElementNS(svg.namespaceURI, "g"),
+        rect = document.createElementNS(svg.namespaceURI, "rect"),
+        text = document.createElementNS(svg.namespaceURI, "text"),
+        title = document.createElementNS(svg.namespaceURI, "title");
+      rect.setAttribute("x", p.x);
+      rect.setAttribute("y", p.y);
+      rect.setAttribute("width", "200");
+      rect.setAttribute("height", "56");
+      rect.setAttribute("rx", "6");
+      text.setAttribute("x", p.x + 10);
+      text.setAttribute("y", p.y + 32);
+      text.textContent =
+        n.title.length > 23 ? n.title.slice(0, 22) + "…" : n.title;
+      title.textContent =
+        n.title + " · " + n.file + (n.line ? ":" + n.line : "");
+      g.append(rect, text, title);
+      svg.append(g);
+    }
+    jsOverview.append(svg);
+    if (graph.nodes.length > visible.length)
+      jsOverview.append(
+        make(
+          "p",
+          "muted",
+          "摘要顯示 " +
+            visible.length +
+            "／" +
+            graph.nodes.length +
+            " 個節點；完整圖可逐層展開並調整接線。",
+        ),
+      );
+    for (const warning of graph.warnings)
+      jsOverview.append(make("p", "muted", warning));
+  }
+  window.addEventListener("analyzer:selection", renderJavaScriptOverview);
   const viewer = $(".viewer");
   preview.body.append(viewer);
   const inspectActions = make("div", "node-preview-actions");
@@ -209,11 +324,15 @@
   diagram.innerHTML =
     '<div class="wire-nav"><i></i><span></span><span></span></div><div class="wire-main"><div><span></span><span></span><span></span><b></b></div><aside><i></i><i></i><i></i></aside></div><div class="wire-footer"><i></i><i></i><i></i></div>';
   const emptyDemo = $("#empty-demo");
-  emptyDemo.textContent = "載入示範，看看如何連起來";
+  emptyDemo.textContent = "執行網頁預覽";
   previewEmpty.append(
     diagram,
     make("h3", "", "畫面與程式碼，一起看懂。"),
-    make("p", "", "開啟專案，或先用示範探索。\n來源程式不會被執行。"),
+    make(
+      "p",
+      "",
+      "先開啟專案，或輸入自己的 HTML。\n修改 CSS 即時觀察排版變化。",
+    ),
     emptyDemo,
   );
   preview.body.append(previewEmpty);
@@ -292,6 +411,7 @@
     [source, pages],
     [pages, tree],
     [tree, inspector],
+    [tree, javascript],
     [tree, preview],
   ];
   const paths = graph.map(() => {
@@ -389,7 +509,7 @@
   reset.setAttribute("aria-label", "重設畫布");
   zoomTools.append(zoomOut, zoomLabel, zoomIn, fit, reset);
   canvas.append(zoomTools);
-  const nodes = [source, pages, tree, inspector, preview];
+  const nodes = [source, pages, tree, inspector, preview, javascript];
   const mainWireTools = make("div", "main-wire-tools");
   document.body.append(mainWireTools);
   // Reserve a separate toolbar row; wrapping must never cover the canvas caption or cards.
@@ -561,7 +681,15 @@
       node.el.classList.remove("is-sized");
       node.el.style.height = "";
       node.el.style.width =
-        (node === source ? 280 : node === preview ? 610 : 300) + "px";
+        (node === source
+          ? 280
+          : node === preview
+            ? 610
+            : node === inspector
+              ? 540
+              : node === javascript
+                ? 520
+                : 300) + "px";
       if (node === preview) {
         previewMode = "full";
         previewFullPage = false;
@@ -1713,6 +1841,11 @@
     selectedProject.textContent =
       $("#project-title").textContent.replace(/ · 專案地圖$/, "") ||
       (ready ? $("#source-label").textContent : "尚未載入專案");
+    jsOpen.disabled = !ready;
+    if (!ready)
+      jsOverview.replaceChildren(
+        make("p", "muted", "先執行網頁預覽，再點選要解析的元素。"),
+      );
     infoButton.disabled = !ready;
     metrics.dataset.ready = String(ready);
     if (ready && manualDialog.open) manualDialog.close();

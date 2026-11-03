@@ -105,7 +105,14 @@ window.CSSLab = (() => {
     const result = [];
     ctx.report.css_rules.forEach((rule, index) => {
       scratch.cssText = rule.declarations
-        .map((d) => d.property + ":" + d.value + (d.important ? " !important" : "") + ";")
+        .map(
+          (d) =>
+            d.property +
+            ":" +
+            d.value +
+            (d.important ? " !important" : "") +
+            ";",
+        )
         .join("");
       const value = scratch.getPropertyValue(key),
         reset = scratch.getPropertyValue("all");
@@ -154,11 +161,412 @@ window.CSSLab = (() => {
       });
     return result;
   }
+  const structureNames = {
+    width: "寬度",
+    height: "高度",
+    "min-width": "最小寬度",
+    "max-width": "最大寬度",
+    "min-height": "最小高度",
+    "max-height": "最大高度",
+    "box-sizing": "盒模型尺寸算法",
+    display: "排版模型",
+    position: "定位方式",
+    top: "頂部位移",
+    right: "右側位移",
+    bottom: "底部位移",
+    left: "左側位移",
+    "z-index": "堆疊順序",
+    "margin-top": "外距頂部",
+    "margin-right": "外距右側",
+    "margin-bottom": "外距底部",
+    "margin-left": "外距左側",
+    "padding-top": "內距頂部",
+    "padding-right": "內距右側",
+    "padding-bottom": "內距底部",
+    "padding-left": "內距左側",
+    "border-top-width": "頂部邊框寬度",
+    "border-right-width": "右側邊框寬度",
+    "border-bottom-width": "底部邊框寬度",
+    "border-left-width": "左側邊框寬度",
+    "border-style": "邊框樣式",
+    "border-color": "邊框顏色",
+    "border-radius": "圓角",
+    color: "文字顏色",
+    "background-color": "背景顏色",
+    "font-size": "文字大小",
+    "font-weight": "文字粗細",
+    "line-height": "行高",
+    "text-align": "文字對齊",
+    "overflow-x": "水平溢出",
+    "overflow-y": "垂直溢出",
+    "flex-direction": "主軸方向",
+    "flex-wrap": "換行方式",
+    "justify-content": "主軸分配",
+    "align-items": "交叉軸對齊",
+    "align-content": "多行對齊",
+    "row-gap": "列間距",
+    "column-gap": "欄間距",
+    "flex-grow": "伸展比例",
+    "flex-shrink": "收縮比例",
+    "flex-basis": "基礎尺寸",
+    order: "排列順序",
+    "align-self": "個別對齊",
+    "grid-template-columns": "欄軌道配置",
+    "grid-template-rows": "列軌道配置",
+    "grid-auto-flow": "自動排列方向",
+    "grid-column": "所在欄",
+    "grid-row": "所在列",
+    "justify-items": "格內水平對齊",
+    "justify-self": "個別水平對齊",
+    transform: "視覺變形",
+  };
+  const structureOpen = new Map();
+  function renderStructure(box, ctx) {
+    const { element, win, node } = ctx,
+      rows = [];
+    const computed = () => win.getComputedStyle(element);
+    const heading = make("div", undefined, "css-structure-heading");
+    heading.append(
+      make("h3", "CSS 結構"),
+      make(
+        "p",
+        "先選取預覽或 HTML 結構中的元素；修改欄位即時套用到預覽。僅改預覽，不寫回來源檔。",
+        "muted",
+      ),
+    );
+    const groups = [];
+    const toggleAll = button("全部展開", () => {
+      const open = groups.some((g) => !g.open);
+      for (const g of groups) {
+        g.open = open;
+        structureOpen.set(g.id, open);
+      }
+      toggleAll.textContent = open ? "全部收合" : "全部展開";
+    });
+    heading.append(toggleAll);
+    box.append(heading);
+    function group(title, id, open) {
+      const g = section(title, id, structureOpen.get(id) ?? open);
+      g.addEventListener("toggle", () => structureOpen.set(id, g.open));
+      groups.push(g);
+      box.append(g);
+      return g;
+    }
+    function declared(target, key) {
+      const inline = target.style.getPropertyValue(key);
+      if (inline) return { value: inline, source: "預覽行內設定" };
+      const all = candidates(target, ctx, key).filter(
+        (x) => x.state === "條件符合",
+      );
+      if (all.some((x) => x.complex || !x.spec))
+        return {
+          value: win.getComputedStyle(target).getPropertyValue(key),
+          source: "運算值（規則需另外判斷）",
+        };
+      all.sort(
+        (a, b) =>
+          Number(a.important) - Number(b.important) ||
+          compare(a.spec, b.spec) ||
+          a.index - b.index,
+      );
+      const found = all.at(-1);
+      return found
+        ? {
+            value: found.value,
+            source:
+              found.selector +
+              (found.file ? " · " + found.file + ":" + found.line : ""),
+          }
+        : {
+            value: win.getComputedStyle(target).getPropertyValue(key),
+            source: "運算值／瀏覽器預設",
+          };
+    }
+    function update() {
+      for (const row of rows)
+        row.current.textContent =
+          "目前運算值：" +
+          win.getComputedStyle(row.target).getPropertyValue(row.key);
+      explain();
+    }
+    function fields(container, target, keys) {
+      for (const key of keys) {
+        const record = declared(target, key),
+          row = make("div", undefined, "css-parameter-row");
+        const label = make(
+          "label",
+          key + "（" + (structureNames[key] || "原始屬性") + "）：",
+        );
+        const controls = make("div", undefined, "css-parameter-controls"),
+          value = make("input"),
+          unit = make("select");
+        value.type = "text";
+        value.spellcheck = false;
+        value.setAttribute(
+          "aria-label",
+          identify(target) + " " + key + " 設定值",
+        );
+        unit.setAttribute("aria-label", identify(target) + " " + key + " 單位");
+        for (const u of [
+          "",
+          "px",
+          "%",
+          "em",
+          "rem",
+          "vw",
+          "vh",
+          "vmin",
+          "vmax",
+          "ch",
+          "svh",
+          "dvh",
+          "fr",
+          "deg",
+          "s",
+          "ms",
+        ]) {
+          const o = make("option", u || "無／包含於值");
+          o.value = u;
+          unit.append(o);
+        }
+        const match = record.value
+          .trim()
+          .match(
+            /^(-?(?:\d*\.)?\d+)(px|%|em|rem|vw|vh|vmin|vmax|ch|svh|dvh|fr|deg|ms|s)?$/,
+          );
+        value.value = match ? match[1] : record.value;
+        unit.value = match ? match[2] || "" : "";
+        label.append(value); // Keep the visible name explicitly associated with its input.
+        const current = make(
+          "small",
+          "目前運算值：" + win.getComputedStyle(target).getPropertyValue(key),
+          "css-parameter-computed",
+        );
+        const feedback = make("small", "", "css-parameter-feedback");
+        feedback.setAttribute("aria-live", "polite");
+        const source = make(
+          "small",
+          "初始值依據：" + record.source,
+          "css-parameter-source",
+        );
+        function apply() {
+          const raw = value.value.trim(),
+            next = raw + unit.value;
+          if (
+            !raw ||
+            /[;{}]|url\s*\(|@import/i.test(next) ||
+            !win.CSS.supports(key, next)
+          ) {
+            feedback.textContent = "此值或單位不適用，預覽保留上次有效設定。";
+            value.setAttribute("aria-invalid", "true");
+            return;
+          }
+          const id = target.dataset.webAnalyzerNode || "parent:" + node.id;
+          const original = edits.get(id) || {
+            original: target.getAttribute("style"),
+            element: target,
+          };
+          target.style.setProperty(key, next, "important");
+          edits.set(id, { ...original, draft: target.style.cssText });
+          drafts.set(id, target.style.cssText);
+          value.removeAttribute("aria-invalid");
+          feedback.textContent = "已即時套用：" + key + ": " + next;
+          update();
+        }
+        value.oninput = apply;
+        unit.onchange = apply;
+        const restore = button("還原", () => {
+          const id = target.dataset.webAnalyzerNode || "parent:" + node.id,
+            entry = edits.get(id);
+          if (entry) {
+            const original = make("div").style;
+            original.cssText = entry.original || "";
+            const old = original.getPropertyValue(key);
+            if (old)
+              target.style.setProperty(
+                key,
+                old,
+                original.getPropertyPriority(key),
+              );
+            else target.style.removeProperty(key);
+            entry.draft = target.style.cssText;
+            drafts.set(id, entry.draft);
+          }
+          const now = declared(target, key).value,
+            m = now
+              .trim()
+              .match(
+                /^(-?(?:\d*\.)?\d+)(px|%|em|rem|vw|vh|vmin|vmax|ch|svh|dvh|fr|deg|ms|s)?$/,
+              );
+          value.value = m ? m[1] : now;
+          unit.value = m ? m[2] || "" : "";
+          feedback.textContent = "已還原此屬性";
+          value.removeAttribute("aria-invalid");
+          update();
+        });
+        controls.append(label, unit, restore);
+        row.append(controls, current, source, feedback);
+        container.append(row);
+        rows.push({ target, key, current });
+      }
+    }
+    fields(group("基本尺寸與盒模型", "css-basic-fields", true), element, [
+      "width",
+      "height",
+      "min-width",
+      "max-width",
+      "min-height",
+      "max-height",
+      "box-sizing",
+    ]);
+    fields(group("外距 margin", "css-margin-fields", true), element, [
+      "margin-top",
+      "margin-right",
+      "margin-bottom",
+      "margin-left",
+    ]);
+    fields(group("內距 padding", "css-padding-fields", false), element, [
+      "padding-top",
+      "padding-right",
+      "padding-bottom",
+      "padding-left",
+    ]);
+    fields(group("定位與位移", "css-position-fields", false), element, [
+      "display",
+      "position",
+      "top",
+      "right",
+      "bottom",
+      "left",
+      "z-index",
+      "transform",
+    ]);
+    fields(group("文字、背景與邊框", "css-appearance-fields", false), element, [
+      "font-size",
+      "font-weight",
+      "line-height",
+      "text-align",
+      "color",
+      "background-color",
+      "border-top-width",
+      "border-right-width",
+      "border-bottom-width",
+      "border-left-width",
+      "border-style",
+      "border-color",
+      "border-radius",
+      "overflow-x",
+      "overflow-y",
+    ]);
+    const parent = element.parentElement,
+      model = group("上一層模型：為什麼元素在這裡？", "css-parent-model", true),
+      explanation = make("p", "", "info-box");
+    model.append(explanation);
+    function explain() {
+      const own = computed(),
+        r = element.getBoundingClientRect();
+      if (!parent) {
+        explanation.textContent =
+          "此元素沒有父元素；位置以文件根節點與視窗為參考。";
+        return;
+      }
+      const p = win.getComputedStyle(parent),
+        pr = parent.getBoundingClientRect(),
+        display = p.display;
+      const why = display.includes("flex")
+        ? "Flex：父層 flex-direction 決定主軸，justify-content 分配主軸空間，align-items 對齊交叉軸；子元素 flex-basis／grow／shrink 與 align-self 也參與排版。"
+        : display.includes("grid")
+          ? "Grid：父層 grid-template-columns／rows 決定軌道，gap 決定間距；子元素 grid-column／row 決定格位，align-self／justify-self 調整格內對齊。"
+          : "一般文件流：父層內容區、padding、子元素 display／寬高與 margin 共同影響位置；相鄰外距在部分區塊排版中可能合併。";
+      explanation.textContent =
+        "父層 " +
+        identify(parent) +
+        "，display: " +
+        display +
+        "。" +
+        why +
+        " 本元素 position: " +
+        own.position +
+        "；目前左上角相對父層邊界約為 x=" +
+        Math.round(r.left - pr.left) +
+        "px、y=" +
+        Math.round(r.top - pr.top) +
+        "px。" +
+        (["absolute", "fixed"].includes(own.position)
+          ? "此元素脫離正常排版；位移請參考 offsetParent " +
+            (element.offsetParent
+              ? identify(element.offsetParent)
+              : "視窗或包含區塊") +
+            "，transform 等祖先設定也可能改變參考範圍。"
+          : "這是排版關係線索，並非單一屬性造成位置的證明。");
+    }
+    if (parent) {
+      if (parent.dataset.webAnalyzerNode)
+        model.append(
+          button("選取上一層", () =>
+            ctx.selectNode(parent.dataset.webAnalyzerNode),
+          ),
+        );
+      const parentFields = section(
+        "父層實際參數（可即時調整）",
+        "css-parent-parameters",
+        structureOpen.get("css-parent-parameters") ?? false,
+      );
+      groups.push(parentFields);
+      parentFields.addEventListener("toggle", () =>
+        structureOpen.set(parentFields.id, parentFields.open),
+      );
+      model.append(parentFields);
+      fields(parentFields, parent, [
+        "display",
+        "width",
+        "height",
+        "position",
+        "padding-top",
+        "padding-right",
+        "padding-bottom",
+        "padding-left",
+        "flex-direction",
+        "flex-wrap",
+        "justify-content",
+        "align-items",
+        "align-content",
+        "row-gap",
+        "column-gap",
+        "grid-template-columns",
+        "grid-template-rows",
+        "grid-auto-flow",
+        "justify-items",
+      ]);
+      const childFields = section(
+        "本元素在父層模型中的參數",
+        "css-child-parameters",
+        structureOpen.get("css-child-parameters") ?? false,
+      );
+      groups.push(childFields);
+      childFields.addEventListener("toggle", () =>
+        structureOpen.set(childFields.id, childFields.open),
+      );
+      model.append(childFields);
+      fields(childFields, element, [
+        "flex-grow",
+        "flex-shrink",
+        "flex-basis",
+        "order",
+        "align-self",
+        "grid-column",
+        "grid-row",
+        "justify-self",
+      ]);
+    }
+    explain();
+  }
   function render(box, ctx) {
     const { element, win, node, refresh } = ctx;
     if (!element) return;
+    renderStructure(box, ctx);
     const computed = win.getComputedStyle(element);
-    const model = section("盒模型與排版關係", "box-model");
+    const model = section("盒模型圖與補充關係", "box-model", false);
     const margin = make("div", undefined, "box-layer box-margin");
     const border = make("div", undefined, "box-layer box-border");
     const padding = make("div", undefined, "box-layer box-padding");
@@ -167,8 +575,12 @@ window.CSSLab = (() => {
         .map((side) => computed.getPropertyValue(prefix + "-" + side + suffix))
         .join(" / ");
     margin.append(make("div", "margin · " + values("margin"), "box-caption"));
-    border.append(make("div", "border · " + values("border", "-width"), "box-caption"));
-    padding.append(make("div", "padding · " + values("padding"), "box-caption"));
+    border.append(
+      make("div", "border · " + values("border", "-width"), "box-caption"),
+    );
+    padding.append(
+      make("div", "padding · " + values("padding"), "box-caption"),
+    );
     const num = (p) => parseFloat(computed.getPropertyValue(p)) || 0;
     const width = parseFloat(computed.width),
       height = parseFloat(computed.height);
@@ -188,9 +600,14 @@ window.CSSLab = (() => {
           num("border-top-width") -
           num("border-bottom-width")
         : height;
-    const px = (n) => (Number.isFinite(n) ? Math.max(0, n).toFixed(1) + "px" : "auto");
+    const px = (n) =>
+      Number.isFinite(n) ? Math.max(0, n).toFixed(1) + "px" : "auto";
     padding.append(
-      make("div", "內容 " + px(contentWidth) + " × " + px(contentHeight), "box-content"),
+      make(
+        "div",
+        "內容 " + px(contentWidth) + " × " + px(contentHeight),
+        "box-content",
+      ),
     );
     border.append(padding);
     margin.append(border);
@@ -206,7 +623,10 @@ window.CSSLab = (() => {
       parent = element.parentElement;
     const info = make("dl", undefined, "attributes");
     for (const [key, value] of [
-      ["畫面邊界", rect.width.toFixed(1) + " × " + rect.height.toFixed(1) + " px"],
+      [
+        "畫面邊界",
+        rect.width.toFixed(1) + " × " + rect.height.toFixed(1) + " px",
+      ],
       ["box-sizing", computed.boxSizing],
       ["position", computed.position],
       ["display", computed.display],
@@ -264,7 +684,7 @@ window.CSSLab = (() => {
       );
     box.append(model);
 
-    const cascade = section("哪一條 CSS 在控制它？", "css-cascade");
+    const cascade = section("哪一條 CSS 在控制它？", "css-cascade", false);
     const select = make("select");
     select.id = "css-property";
     select.setAttribute("aria-label", "要追查的 CSS 屬性");
@@ -283,7 +703,8 @@ window.CSSLab = (() => {
       details.append(
         make(
           "p",
-          "瀏覽器實際運算值：" + win.getComputedStyle(element).getPropertyValue(property),
+          "瀏覽器實際運算值：" +
+            win.getComputedStyle(element).getPropertyValue(property),
           "computed-value",
         ),
       );
@@ -371,7 +792,11 @@ window.CSSLab = (() => {
           make("code", item.selector),
           make(
             "pre",
-            property + ": " + item.value + (item.important ? " !important" : "") + ";",
+            property +
+              ": " +
+              item.value +
+              (item.important ? " !important" : "") +
+              ";",
           ),
         );
         if (item.spec)
@@ -398,7 +823,10 @@ window.CSSLab = (() => {
           "muted",
         ),
       );
-      if (winner?.value.includes("%") && ["height", "min-height"].includes(property))
+      if (
+        winner?.value.includes("%") &&
+        ["height", "min-height"].includes(property)
+      )
         details.append(
           make(
             "p",
@@ -410,7 +838,7 @@ window.CSSLab = (() => {
     select.onchange = draw;
     draw();
 
-    const editor = section("動手改 CSS · 僅影響預覽", "css-editor");
+    const editor = section("進階 CSS 宣告與還原全部", "css-editor", false);
     const note = make(
       "p",
       "輸入 CSS 宣告後套用，直接觀察預覽與尺寸變化。原始 HTML、來源檔與分析 JSON 保留原內容。",

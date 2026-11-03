@@ -2266,3 +2266,22 @@ body.component-mode .canvas-metrics {
 @media(max-width:760px) {
   .flow-world, body.canvas-list .flow-world { top:auto; }
 }
+
+/* CSS structure: editable value + explicit unit, grouped behind native disclosure buttons. */
+#inspector-node .flow-node-content { max-height:680px; overflow:auto; }
+.css-structure-heading h3 { margin:0 0 8px; font-size:16px; }
+.css-parameter-row { padding:12px 0; border-bottom:1px solid #ffffff16; }
+.css-parameter-controls { display:grid; grid-template-columns:minmax(0,1fr) 110px auto; gap:8px; align-items:end; }
+.css-parameter-controls label { display:flex; flex-direction:column; gap:6px; margin:0; font:12px var(--mono,monospace); color:#dbe6df; }
+.css-parameter-controls input, .css-parameter-controls select { width:100%; min-width:0; box-sizing:border-box; padding:7px; color:#edf5ef; background:#152019; border:1px solid #637569; border-radius:5px; }
+.css-parameter-controls input[aria-invalid="true"] { border-color:#df9f76; }
+.css-parameter-controls button { padding:7px; font-size:11px; }
+.css-parameter-row small { display:block; margin-top:5px; overflow-wrap:anywhere; line-height:1.5; }
+.css-parameter-source { color:#92a99a; }
+.css-parameter-feedback { color:#c7e5ce; }
+.javascript-mini-flow { width:100%; display:block; margin:12px 0; }
+.javascript-mini-flow path { fill:none; stroke:#86b798; stroke-width:1.5; }
+.javascript-mini-flow rect { fill:#202e25; stroke:#668572; }
+.javascript-mini-flow text { fill:#e4efe8; font:11px monospace; }
+.javascript-selected { color:#c1e4cb; font:12px monospace; }
+@media(max-width:760px) { .css-parameter-controls { grid-template-columns:minmax(0,1fr) 85px; } .css-parameter-controls button { grid-column:2; } }
